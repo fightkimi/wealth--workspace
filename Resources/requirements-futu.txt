@@ -1,0 +1,4 @@
+# Bundled only into the read-only Futu OpenD helper during release packaging.
+# Version is pinned after the verified build.
+futu-api==10.10.7008
+pyinstaller==6.22.2

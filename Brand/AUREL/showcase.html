@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AUREL — Brand Mark Exploration</title>
+  <style>
+    :root { color-scheme: dark; --ink:#13140f; --panel:#27251c; --raised:#343026; --line:#706750; --ivory:#f1efe8; --gold:#d7b66f; --muted:#858175; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; color:var(--ivory); font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif; background:radial-gradient(circle at 18% 0%,#64481755,transparent 46%),var(--ink); }
+    main { max-width:1120px; margin:auto; padding:80px 36px 110px; }
+    header { display:flex; align-items:end; justify-content:space-between; gap:32px; margin-bottom:54px; }
+    h1 { margin:0; font-size:54px; letter-spacing:.18em; font-weight:600; }
+    header p { color:var(--muted); letter-spacing:.18em; font-size:11px; margin:0 0 8px; }
+    .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+    article { min-height:330px; padding:26px; border:1px solid #9a8d7028; border-radius:16px; background:linear-gradient(145deg,var(--raised),var(--panel)); transition:transform .35s ease,border-color .35s ease; }
+    article:hover { transform:translateY(-4px); border-color:#d7b66f77; }
+    article.selected { box-shadow:inset 0 0 0 1px #d7b66f88; }
+    object { width:132px; height:132px; color:var(--ivory); display:block; margin:10px auto 28px; filter:drop-shadow(0 14px 28px #0008); }
+    h2 { margin:0 0 7px; font-size:16px; letter-spacing:.08em; }
+    .code { color:var(--gold); font:10px ui-monospace,monospace; letter-spacing:.16em; }
+    .copy { color:#bcb8a9; line-height:1.75; font-size:12px; }
+    footer { margin-top:28px; color:var(--muted); font-size:11px; letter-spacing:.08em; }
+    @media(max-width:800px){.grid{grid-template-columns:1fr 1fr}header{align-items:start;flex-direction:column}}
+  </style>
+</head>
+<body><main>
+  <header><div><h1>AUREL</h1><p>PRIVATE CAPITAL DESK</p></div><p>BRAND MARK EXPLORATION · 2026</p></header>
+  <section class="grid">
+    <article class="selected"><object data="01-capital-arc.svg"></object><h2>Capital Arc</h2><p class="code">SELECTED / GEOMETRY + LINE</p><p class="copy">抽象字母 A 与资产轨迹共用一条横向结构，外圈形成私人资本印章。最克制、最适合长期使用。</p></article>
+    <article><object data="02-monolith.svg"></object><h2>Monolith</h2><p class="code">PURE GEOMETRY</p><p class="copy">厚重单体结构，强调资本基础与稳定性，视觉力量强，但小尺寸略显锋利。</p></article>
+    <article><object data="03-ledger-dots.svg"></object><h2>Ledger Dots</h2><p class="code">DOT MATRIX</p><p class="copy">由离散账本节点组成字母骨架，数字感更强，适合数据平台，但金融私人感稍弱。</p></article>
+    <article><object data="04-horizon-lines.svg"></object><h2>Horizon Lines</h2><p class="code">LINE SYSTEM</p><p class="copy">多层资产曲线被收纳进圆形视野，强调观察与复盘，信息密度较高。</p></article>
+    <article><object data="05-orbit.svg"></object><h2>Orbit</h2><p class="code">ASYMMETRIC GEOMETRY</p><p class="copy">不完整轨道与单一焦点表达长期复利和动态平衡，识别度高但与名称关联较弱。</p></article>
+    <article><object data="06-capital-nodes.svg"></object><h2>Capital Nodes</h2><p class="code">NODE NETWORK</p><p class="copy">节点关系形成上升路径，适合组合分析语义，整体更偏金融数据工程。</p></article>
+  </section>
+  <footer>Selected mark is optimized for the macOS app icon, 16px navigation use and monochrome reproduction.</footer>
+</main></body>
+</html>

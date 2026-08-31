@@ -1,0 +1,10 @@
+.build/
+dist/
+.DS_Store
+*.dmg
+*.zip
+.env
+.env.local
+.venv/
+Resources/futu-runtime/
+Resources/Tools/

@@ -1,0 +1,9 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs><clipPath id="disc"><circle cx="50" cy="50" r="36"/></clipPath></defs>
+  <g clip-path="url(#disc)" fill="none" stroke="currentColor" stroke-linecap="round">
+    <path d="M15 68 H36 L48 54 L60 60 L85 32" stroke-width="4"/>
+    <path d="M15 76 H40 L51 63 L65 68 L85 48" stroke-width="2.5" opacity="0.55"/>
+    <path d="M15 84 H45 L56 73 L70 77 L85 64" stroke-width="2" opacity="0.26"/>
+  </g>
+  <circle cx="50" cy="50" r="36" fill="none" stroke="currentColor" stroke-width="2.5" opacity="0.4"/>
+</svg>

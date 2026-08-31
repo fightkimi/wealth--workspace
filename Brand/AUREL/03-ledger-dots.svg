@@ -1,0 +1,10 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs><circle id="dot" r="4" fill="currentColor"/></defs>
+  <g>
+    <use href="#dot" x="28" y="72"/><use href="#dot" x="34" y="58"/>
+    <use href="#dot" x="40" y="44"/><use href="#dot" x="46" y="30"/>
+    <use href="#dot" x="56" y="30"/><use href="#dot" x="62" y="44"/>
+    <use href="#dot" x="68" y="58"/><use href="#dot" x="74" y="72"/>
+    <rect x="37" y="57" width="28" height="7" rx="3.5" fill="currentColor" opacity="0.48"/>
+  </g>
+</svg>
