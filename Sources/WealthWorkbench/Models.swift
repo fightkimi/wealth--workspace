@@ -2,9 +2,9 @@ import Foundation
 
 enum AppSection: String, CaseIterable, Identifiable {
     case overview = "今日总览"
+    case holdings = "我的持仓"
     case news = "财经资讯"
     case review = "仓位复盘"
-    case holdings = "我的持仓"
     case calendar = "事件日历"
     case settings = "通用设置"
 

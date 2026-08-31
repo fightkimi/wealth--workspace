@@ -5,6 +5,7 @@ struct WealthWorkbenchChecks {
     private static var passed = 0
 
     static func main() async throws {
+        try checkNavigationOrder()
         try checkExactAndEstimatedQuantity()
         try checkMarketNormalization()
         try checkTradingSessions()
@@ -20,6 +21,15 @@ struct WealthWorkbenchChecks {
         try checkFutuCalendarDecoding()
         try await checkNewsCacheFallback()
         print("VERIFICATION PASSED: \(passed) checks")
+    }
+
+    private static func checkNavigationOrder() throws {
+        try expect(
+            AppSection.allCases == [.overview, .holdings, .news, .review, .calendar, .settings],
+            "顶部导航应先显示今日总览，再显示我的持仓"
+        )
+        try expect(AppSection.overview.rawValue == "今日总览", "今日总览标签必须保持完整")
+        pass("顶部导航顺序与标签")
     }
 
     private static func checkExactAndEstimatedQuantity() throws {

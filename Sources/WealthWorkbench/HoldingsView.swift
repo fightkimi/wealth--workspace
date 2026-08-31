@@ -274,7 +274,7 @@ private struct HoldingCard: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(metrics.holding.name)
-                            .font(.custom("PingFangSC-Semibold", size: 14))
+                            .font(.custom("PingFangSC-Semibold", size: 15))
                             .foregroundStyle(WorkbenchTheme.text)
                             .lineLimit(1)
                         if metrics.holding.isEstimated {
@@ -286,7 +286,7 @@ private struct HoldingCard: View {
                     Text("数量 \(DisplayFormat.number(metrics.holding.effectiveQuantity, digits: 4))")
                         .lineLimit(1)
                 }
-                .font(.custom("PingFangSC-Regular", size: 9))
+                .font(.custom("PingFangSC-Regular", size: 10))
                 .foregroundStyle(WorkbenchTheme.muted)
                 .frame(minWidth: 160, maxWidth: .infinity, alignment: .leading)
 
@@ -299,8 +299,10 @@ private struct HoldingCard: View {
                     Text(metrics.quote.map { DisplayFormat.money($0.price, currency: metrics.holding.currency) } ?? "暂无数据")
                         .foregroundStyle(metrics.quote == nil ? WorkbenchTheme.muted : WorkbenchTheme.text)
                 }
-                .font(.custom("PingFangSC-Medium", size: 11))
+                .font(.custom("PingFangSC-Medium", size: 13))
                 .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
                 .frame(minWidth: 115, maxWidth: .infinity, alignment: .trailing)
 
                 HoldingCell(value: DisplayFormat.percent(metrics.quote?.percentChange), change: metrics.quote?.percentChange, width: 75)
@@ -312,7 +314,7 @@ private struct HoldingCard: View {
                     Text(metrics.quote?.passport.session.rawValue ?? "暂无数据")
                         .foregroundStyle(metrics.quote == nil ? WorkbenchTheme.warning : WorkbenchTheme.secondary)
                 }
-                .font(.custom("PingFangSC-Medium", size: 10))
+                .font(.custom("PingFangSC-Medium", size: 11))
                 .frame(minWidth: 86, maxWidth: 120, alignment: .leading)
 
                 Menu {
@@ -344,7 +346,25 @@ private struct HoldingCard: View {
             }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.vertical, 13)
+        .background(alignment: .topTrailing) {
+            HoldingTrendWatermark(change: metrics.quote?.percentChange)
+        }
+    }
+}
+
+private struct HoldingTrendWatermark: View {
+    let change: Double?
+
+    var body: some View {
+        if let change, change != 0 {
+            Image(systemName: change > 0 ? "arrow.up.right" : "arrow.down.right")
+                .font(.system(size: 58, weight: .ultraLight))
+                .foregroundStyle((change > 0 ? WorkbenchTheme.positive : WorkbenchTheme.negative).opacity(0.09))
+                .padding(.top, 15)
+                .padding(.trailing, 172)
+                .accessibilityHidden(true)
+        }
     }
 }
 
@@ -401,10 +421,10 @@ private struct HoldingCell: View {
                 Text(value).foregroundStyle(WorkbenchTheme.text)
             }
         }
-        .font(.custom("PingFangSC-Semibold", size: 11))
+        .font(.custom("PingFangSC-Semibold", size: 13))
         .monospacedDigit()
         .lineLimit(1)
-        .minimumScaleFactor(0.72)
+        .minimumScaleFactor(0.78)
         .frame(minWidth: width, maxWidth: .infinity, alignment: .trailing)
     }
 }

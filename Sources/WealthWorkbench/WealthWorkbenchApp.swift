@@ -116,7 +116,7 @@ private struct WorkbenchTopBar: View {
             .background(WorkbenchTheme.panel.opacity(0.88))
             .overlay(Capsule().stroke(WorkbenchTheme.border, lineWidth: 1))
             .clipShape(Capsule())
-            .frame(maxWidth: 540)
+            .fixedSize(horizontal: true, vertical: false)
         }
         .padding(.leading, 18)
         .padding(.trailing, 18)
@@ -204,9 +204,10 @@ private struct TopNavigationItem: View {
                 Text(section.rawValue)
                     .font(.custom("PingFangSC-Medium", size: 11))
                     .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .foregroundStyle(isSelected ? WorkbenchTheme.canvas : WorkbenchTheme.secondary)
-            .padding(.horizontal, 11)
+            .padding(.horizontal, 12)
             .frame(minHeight: 32, maxHeight: 32)
             .background(
                 isSelected
