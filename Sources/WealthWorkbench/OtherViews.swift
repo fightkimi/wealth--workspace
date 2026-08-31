@@ -205,7 +205,7 @@ private struct ReviewStat: View {
 }
 
 struct FinancialNewsView: View {
-    @StateObject private var news = NewsStore()
+    @ObservedObject var news: NewsStore
     @State private var selectedArticle: NewsItem?
 
     var body: some View {
@@ -227,13 +227,35 @@ struct FinancialNewsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: WorkbenchLayout.sectionSpacing) {
                 HStack(alignment: .top, spacing: 20) {
-                    SectionHeader(eyebrow: "MARKET INTELLIGENCE", title: "财经资讯", detail: "最新资讯在应用内直接阅读")
+                    SectionHeader(
+                        eyebrow: "MARKET INTELLIGENCE",
+                        title: "财经资讯",
+                        detail: news.isShowingCachedData ? "已先展示本地缓存，后台更新后自动替换" : "资讯已预载，可在应用内直接阅读"
+                    )
                     Spacer()
+                    if news.isShowingCachedData, let cachedAt = news.cacheTimestamp {
+                        StatusPill(text: "缓存 · \(Self.cacheFormatter.string(from: cachedAt))", tint: WorkbenchTheme.warning)
+                    }
                     Button { Task { await news.refresh() } } label: {
                         Label(news.isLoading ? "刷新中" : "刷新", systemImage: "arrow.clockwise")
                     }
                     .workbenchActionButton(.secondary)
                     .disabled(news.isLoading)
+                }
+                if let advisory = news.advisoryMessage {
+                    HStack(spacing: 8) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .foregroundStyle(WorkbenchTheme.warning)
+                        Text(advisory)
+                            .font(.custom("PingFangSC-Regular", size: 10))
+                            .foregroundStyle(WorkbenchTheme.secondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 34)
+                    .background(WorkbenchTheme.warning.opacity(0.07))
+                    .overlay(RoundedRectangle(cornerRadius: WorkbenchLayout.panelRadius).stroke(WorkbenchTheme.warning.opacity(0.18)))
+                    .clipShape(RoundedRectangle(cornerRadius: WorkbenchLayout.panelRadius))
                 }
                 if news.isLoading && news.items.isEmpty {
                     NewsLoadingState()
@@ -264,6 +286,13 @@ struct FinancialNewsView: View {
             .padding(WorkbenchLayout.pagePadding)
         }
     }
+
+    private static let cacheFormatter: DateFormatter = {
+        let value = DateFormatter()
+        value.locale = Locale(identifier: "zh_CN")
+        value.dateFormat = "HH:mm"
+        return value
+    }()
 }
 
 private struct NewsStoryCard: View {
@@ -916,7 +945,7 @@ struct SettingsView: View {
         ZStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: WorkbenchLayout.sectionSpacing) {
-                    SectionHeader(eyebrow: "CONFIGURATION", title: "设置", detail: "API Key 保存在应用专属本地文件，不使用钥匙串")
+                    SectionHeader(eyebrow: "CONFIGURATION", title: "通用设置", detail: "API Key 保存在应用专属本地文件，不使用钥匙串")
                     sourceCard
                     HStack(alignment: .top, spacing: 12) {
                         cashCard

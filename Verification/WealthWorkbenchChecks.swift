@@ -18,6 +18,7 @@ struct WealthWorkbenchChecks {
         try checkMarketHoldingsSummary()
         try checkWebReaderURLPolicy()
         try checkFutuCalendarDecoding()
+        try await checkNewsCacheFallback()
         print("VERIFICATION PASSED: \(passed) checks")
     }
 
@@ -230,6 +231,31 @@ struct WealthWorkbenchChecks {
         pass("Futu 官方事件日历解析")
     }
 
+    @MainActor
+    private static func checkNewsCacheFallback() async throws {
+        let now = Date(timeIntervalSince1970: 1_788_165_400)
+        let item = NewsItem(
+            title: "缓存资讯",
+            source: "测试来源",
+            publishedAt: now.addingTimeInterval(-300),
+            link: URL(string: "https://example.com/news")!
+        )
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        MockURLProtocol.handler = { _ in throw URLError(.notConnectedToInternet) }
+        let store = NewsStore(
+            session: session,
+            cacheStore: StaticNewsCacheStore(snapshot: NewsCacheSnapshot(fetchedAt: now.addingTimeInterval(-60), items: [item])),
+            now: { now }
+        )
+        try expect(store.items == [item] && store.isShowingCachedData, "资讯页应即时载入新鲜本地缓存")
+        await store.refresh()
+        try expect(store.items == [item], "网络失败时不得清空已显示的资讯缓存")
+        try expect(store.advisoryMessage != nil && store.errorMessage == nil, "缓存回退必须明确标注而不是伪装为实时资讯")
+        pass("资讯预载与缓存回退")
+    }
+
     private static func date(_ value: String, zone: String) throws -> Date {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -261,6 +287,12 @@ private struct EmptyAPIKeyStore: APIKeyPersisting {
     func load() throws -> String? { nil }
     func save(_ value: String) throws {}
     func delete() throws {}
+}
+
+private struct StaticNewsCacheStore: NewsCachePersisting {
+    let snapshot: NewsCacheSnapshot?
+    func load() throws -> NewsCacheSnapshot? { snapshot }
+    func save(_ snapshot: NewsCacheSnapshot) throws {}
 }
 
 private enum CheckError: LocalizedError {

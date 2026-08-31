@@ -6,7 +6,7 @@ enum AppSection: String, CaseIterable, Identifiable {
     case review = "仓位复盘"
     case holdings = "我的持仓"
     case calendar = "事件日历"
-    case settings = "设置"
+    case settings = "通用设置"
 
     var id: String { rawValue }
 

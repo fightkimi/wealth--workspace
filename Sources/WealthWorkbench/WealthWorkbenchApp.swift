@@ -25,6 +25,7 @@ struct WealthWorkbenchApp: App {
 
 struct WorkbenchRootView: View {
     @EnvironmentObject private var store: AppStore
+    @StateObject private var newsStore = NewsStore()
     @State private var selection: AppSection = .overview
     @State private var showingNotice = false
 
@@ -64,6 +65,9 @@ struct WorkbenchRootView: View {
                 await store.refreshQuotes()
             }
         }
+        .task {
+            await newsStore.refresh()
+        }
         .onChange(of: store.notice) { value in showingNotice = value != nil }
         .alert("AUREL", isPresented: $showingNotice) {
             Button("知道了") { store.notice = nil }
@@ -76,7 +80,7 @@ struct WorkbenchRootView: View {
     private var detail: some View {
         switch selection {
         case .overview: OverviewView { selection = .holdings }
-        case .news: FinancialNewsView()
+        case .news: FinancialNewsView(news: newsStore)
         case .review: PortfolioReviewView()
         case .holdings: HoldingsView()
         case .calendar: EventCalendarView()
@@ -114,7 +118,7 @@ private struct WorkbenchTopBar: View {
             .clipShape(Capsule())
             .frame(maxWidth: 540)
         }
-        .padding(.leading, 82)
+        .padding(.leading, 18)
         .padding(.trailing, 18)
         .frame(height: WorkbenchLayout.topBarHeight)
         .background(
