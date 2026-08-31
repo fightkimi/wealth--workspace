@@ -404,6 +404,36 @@ struct FutuBridgeOutput: Decodable {
     }
 }
 
+struct FutuCalendarBridgeOutput: Decodable {
+    struct Item: Decodable {
+        var id: String
+        var type: String
+        var title: String
+        var timestamp: Double?
+        var date: String?
+        var country: String?
+        var market: String?
+        var symbol: String?
+        var importance: Double?
+        var previous: String?
+        var consensus: String?
+        var actual: String?
+        var detail: String?
+        var source: String
+    }
+
+    var ok: Bool
+    var message: String?
+    var serverTimestamp: Double?
+    var events: [Item]?
+    var failures: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case ok, message, events, failures
+        case serverTimestamp = "server_timestamp"
+    }
+}
+
 final class FutuQuoteService {
     private let bridgeURL: URL?
 
@@ -502,6 +532,80 @@ final class FutuQuoteService {
         return QuoteBatchResult(quotes: quotes, failures: failures, serverDate: serverDate, source: "Futu OpenD")
     }
 
+    func fetchCalendar(
+        holdings: [Holding],
+        host: String,
+        port: Int,
+        beginDate: Date,
+        endDate: Date
+    ) async throws -> MarketCalendarResult {
+        guard let bridgeURL, FileManager.default.isExecutableFile(atPath: bridgeURL.path) else {
+            throw QuoteServiceError.bridgeUnavailable
+        }
+        guard await isOpenDReachable(host: host, port: port) else {
+            throw QuoteServiceError.provider("Futu OpenD 未在 \(host):\(port) 监听")
+        }
+        let codes = Array(Set(holdings.map { $0.market.futuSymbol($0.code) })).sorted()
+        let codeData = try JSONEncoder().encode(codes)
+        let codeJSON = String(data: codeData, encoding: .utf8) ?? "[]"
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        formatter.dateFormat = "yyyy-MM-dd"
+        let data = try await runBridge(
+            bridgeURL,
+            arguments: [
+                "calendar", "--host", host, "--port", String(port),
+                "--begin-date", formatter.string(from: beginDate),
+                "--end-date", formatter.string(from: endDate),
+                "--codes", codeJSON,
+            ],
+            timeoutSeconds: 22
+        )
+        return try decodeCalendarBridge(data, fetchedAt: Date())
+    }
+
+    func decodeCalendarBridge(_ data: Data, fetchedAt: Date) throws -> MarketCalendarResult {
+        let output = try JSONDecoder().decode(FutuCalendarBridgeOutput.self, from: data)
+        guard output.ok else {
+            throw QuoteServiceError.provider(output.message ?? "Futu 日历返回错误")
+        }
+        let events = (output.events ?? []).compactMap { item -> MarketCalendarEvent? in
+            let kind: MarketCalendarEventKind
+            switch item.type {
+            case "economic": kind = .economic
+            case "earnings": kind = .earnings
+            default: return nil
+            }
+            let exactTimestamp = item.timestamp.flatMap { $0 > 0 ? Date(timeIntervalSince1970: $0) : nil }
+            let date = exactTimestamp ?? item.date.flatMap { parseCalendarDate($0, marketCode: item.market) }
+            guard let date else { return nil }
+            return MarketCalendarEvent(
+                id: item.id,
+                date: date,
+                hasExactTime: exactTimestamp != nil,
+                title: item.title,
+                kind: kind,
+                country: item.country,
+                market: market(fromFutuCode: item.market),
+                symbol: item.symbol,
+                importance: item.importance.map { Int($0.rounded()) },
+                previous: item.previous,
+                consensus: item.consensus,
+                actual: item.actual,
+                detail: item.detail,
+                source: item.source,
+                fetchedAt: fetchedAt
+            )
+        }
+        .sorted { $0.date < $1.date }
+        return MarketCalendarResult(
+            events: events,
+            failures: output.failures ?? [],
+            serverDate: output.serverTimestamp.map(Date.init(timeIntervalSince1970:))
+        )
+    }
+
     private func isOpenDReachable(host: String, port: Int) async -> Bool {
         guard let endpointPort = NWEndpoint.Port(rawValue: UInt16(clamping: port)) else { return false }
         return await withCheckedContinuation { continuation in
@@ -520,7 +624,7 @@ final class FutuQuoteService {
         }
     }
 
-    private func runBridge(_ url: URL, arguments: [String]) async throws -> Data {
+    private func runBridge(_ url: URL, arguments: [String], timeoutSeconds: Int = 12) async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let process = Process()
@@ -547,7 +651,7 @@ final class FutuQuoteService {
                 process.terminationHandler = { _ in signal.signal() }
                 do {
                     try process.run()
-                    let waitResult = signal.wait(timeout: .now() + .seconds(12))
+                    let waitResult = signal.wait(timeout: .now() + .seconds(timeoutSeconds))
                     output.fileHandleForReading.readabilityHandler = nil
                     errors.fileHandleForReading.readabilityHandler = nil
 
@@ -585,6 +689,23 @@ final class FutuQuoteService {
             if let date = formatter.date(from: value) { return date }
         }
         return nil
+    }
+
+    private func parseCalendarDate(_ value: String, marketCode: String?) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = market(fromFutuCode: marketCode)?.timeZone ?? TimeZone(identifier: "Asia/Shanghai")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.date(from: "\(value) 12:00:00")
+    }
+
+    private func market(fromFutuCode value: String?) -> Market? {
+        switch value {
+        case "US": return .us
+        case "HK": return .hk
+        case "SH", "SZ": return .cn
+        default: return nil
+        }
     }
 }
 

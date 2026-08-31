@@ -145,6 +145,35 @@ struct PortfolioEvent: Codable, Identifiable, Equatable {
     var category: String
 }
 
+enum MarketCalendarEventKind: String, Codable, CaseIterable {
+    case economic = "宏观"
+    case earnings = "财报"
+}
+
+struct MarketCalendarEvent: Identifiable, Equatable {
+    var id: String
+    var date: Date
+    var hasExactTime: Bool
+    var title: String
+    var kind: MarketCalendarEventKind
+    var country: String?
+    var market: Market?
+    var symbol: String?
+    var importance: Int?
+    var previous: String?
+    var consensus: String?
+    var actual: String?
+    var detail: String?
+    var source: String
+    var fetchedAt: Date
+}
+
+struct MarketCalendarResult: Equatable {
+    var events: [MarketCalendarEvent]
+    var failures: [String]
+    var serverDate: Date?
+}
+
 enum QuoteProvider: String, Codable, CaseIterable, Identifiable {
     case automatic = "自动（按优先级）"
     case futu = "Futu OpenD"

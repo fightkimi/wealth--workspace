@@ -10,12 +10,17 @@ Private Capital Desk：一款只读行情、资产数据留在本机的原生 ma
 - 每条价格附带市场、币种、价格类型、交易时段、比较基准、行情时间、抓取时间、来源和延迟状态。
 - 请求失败或字段不可验证时显示“暂无数据”，刷新前会清空旧行情。
 - 美股盘前、常规、盘后和夜盘分别使用对应字段；公开源无法证明扩展时段时只显示今日或最近收盘，不冒充扩展时段价。
+- 事件日历通过 Futu OpenD 官方只读接口获取未来 7 日中高影响经济事件，并按本地持仓筛选财报日历；只给日期的财报事件会标注“时间待定”。
+- 金十不使用网页抓取或已停止的免费引用接口；只有取得开放平台正式授权后才会接入。
 
 ## 官方契约
 
 - [Apple NavigationSplitView](https://developer.apple.com/documentation/swiftui/navigationsplitview)
 - [Futu 获取快照](https://openapi.futunn.com/futu-api-doc/en/quote/get-market-snapshot.html)
 - [Futu 获取市场状态](https://openapi.futunn.com/futu-api-doc/quote/get-market-state.html)
+- [Futu 经济日历](https://openapi.futunn.com/futu-api-doc/hk/quote/get-economic-calendar.html)
+- [Futu 财报日历](https://openapi.futunn.com/futu-api-doc/en/quote/get-earnings-calendar.html)
+- [金十开放平台](https://open.jin10.com/document?anchor=flash-10102-intro)
 - [Twelve Data 扩展时段](https://support.twelvedata.com/en/articles/5195429-pre-post-market-data)
 - [Frankfurter 汇率 API](https://frankfurter.dev/)
 

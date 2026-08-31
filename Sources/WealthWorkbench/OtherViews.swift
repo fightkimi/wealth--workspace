@@ -247,6 +247,7 @@ struct FinancialNewsView: View {
                             }
                         }
                         VStack(spacing: 0) {
+                            NewsLedgerHeader()
                             ForEach(Array(news.items.dropFirst().enumerated()), id: \.element.id) { index, item in
                                 NewsStoryCard(item: item, prominence: .standard) {
                                     selectedArticle = item
@@ -289,18 +290,16 @@ private struct NewsStoryCard: View {
     }
 
     private var leadContent: some View {
-        HStack(alignment: .bottom, spacing: 24) {
-            VStack(alignment: .leading, spacing: 13) {
-                HStack(spacing: 8) {
-                    StatusPill(text: "头条", tint: WorkbenchTheme.accent)
-                    NewsMetadata(item: item)
-                }
+        HStack(alignment: .bottom, spacing: 28) {
+            VStack(alignment: .leading, spacing: 14) {
+                StatusPill(text: "头条", tint: WorkbenchTheme.accent)
                 Text(item.displayTitle)
-                    .font(.custom("PingFangSC-Semibold", size: 21))
+                    .font(.custom("PingFangSC-Semibold", size: 23))
                     .foregroundStyle(WorkbenchTheme.text)
                     .multilineTextAlignment(.leading)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
+                NewsMetadata(item: item)
             }
             Spacer(minLength: 16)
             HStack(spacing: 7) {
@@ -322,20 +321,26 @@ private struct NewsStoryCard: View {
 
     private var rowContent: some View {
         HStack(spacing: 18) {
-            NewsMetadata(item: item)
-                .frame(width: 176, alignment: .leading)
             Text(item.displayTitle)
                 .font(.custom("PingFangSC-Medium", size: 14))
                 .foregroundStyle(WorkbenchTheme.text)
                 .multilineTextAlignment(.leading)
                 .lineLimit(2)
             Spacer(minLength: 12)
-            HStack(spacing: 7) {
-                Text("阅读")
-                Image(systemName: "arrow.right")
-            }
-            .font(.custom("PingFangSC-Medium", size: 10))
-            .foregroundStyle(isHovered ? WorkbenchTheme.accent : WorkbenchTheme.muted)
+            Text(item.source)
+                .font(.custom("PingFangSC-Medium", size: 11))
+                .foregroundStyle(WorkbenchTheme.secondary)
+                .lineLimit(1)
+                .frame(width: 138, alignment: .leading)
+            Text(item.publishedAt.map(Self.timeFormatter.string) ?? "时间未知")
+                .font(.custom("PingFangSC-Regular", size: 11))
+                .foregroundStyle(WorkbenchTheme.muted)
+                .lineLimit(1)
+                .frame(width: 108, alignment: .leading)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(isHovered ? WorkbenchTheme.accent : WorkbenchTheme.muted)
+                .frame(width: 18)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 13)
@@ -343,16 +348,44 @@ private struct NewsStoryCard: View {
         .background(isHovered ? WorkbenchTheme.raised.opacity(0.72) : Color.clear)
         .contentShape(Rectangle())
     }
+
+    private static let timeFormatter: DateFormatter = {
+        let value = DateFormatter()
+        value.locale = Locale(identifier: "zh_CN")
+        value.timeZone = .current
+        value.dateFormat = "M月d日 HH:mm"
+        return value
+    }()
+}
+
+private struct NewsLedgerHeader: View {
+    var body: some View {
+        HStack(spacing: 18) {
+            Text("标题")
+            Spacer(minLength: 12)
+            Text("来源").frame(width: 138, alignment: .leading)
+            Text("发布时间").frame(width: 108, alignment: .leading)
+            Color.clear.frame(width: 18)
+        }
+        .font(.custom("PingFangSC-Medium", size: 10))
+        .tracking(0.8)
+        .foregroundStyle(WorkbenchTheme.muted)
+        .padding(.horizontal, 16)
+        .frame(height: 36)
+        .background(WorkbenchTheme.panel.opacity(0.72))
+        .overlay(alignment: .bottom) { Divider().overlay(WorkbenchTheme.border) }
+    }
 }
 
 private struct NewsMetadata: View {
     let item: NewsItem
 
     var body: some View {
-        HStack(spacing: 10) {
-            Text(item.source)
+        HStack(spacing: 8) {
+            Label(item.source, systemImage: "building.columns")
                 .lineLimit(1)
             if let publishedAt = item.publishedAt {
+                Text("·")
                 Text(Self.formatter.string(from: publishedAt))
                     .lineLimit(1)
             }
@@ -426,21 +459,73 @@ struct EventCalendarView: View {
     @State private var showingEditor = false
     @State private var editorSessionID = UUID()
     @State private var deletingEvent: PortfolioEvent?
+    @State private var filter: CalendarFilter = .all
+
+    private enum CalendarFilter: String, CaseIterable, Identifiable {
+        case all = "全部"
+        case economic = "宏观"
+        case earnings = "财报"
+        case personal = "我的事件"
+        var id: String { rawValue }
+    }
 
     var body: some View {
         ZStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: WorkbenchLayout.sectionSpacing) {
                     HStack(alignment: .top, spacing: 20) {
-                        SectionHeader(eyebrow: "CATALYSTS", title: "事件日历", detail: "本地提醒清单")
+                        SectionHeader(eyebrow: "CATALYSTS", title: "事件日历", detail: "本地关注、Futu OpenD 未来 7 日中高影响事件与持仓财报")
                         Spacer()
-                        if !store.data.events.isEmpty {
+                        HStack(spacing: 8) {
+                            Button { Task { await store.refreshMarketCalendar() } } label: {
+                                Label(store.isRefreshingCalendar ? "刷新中" : "刷新日历", systemImage: "arrow.clockwise")
+                            }
+                            .workbenchActionButton(.secondary)
+                            .disabled(store.isRefreshingCalendar)
                             Button(action: presentEditor) { Label("新增事件", systemImage: "plus") }
                                 .workbenchActionButton(.primary)
                         }
                     }
-                    if store.data.events.isEmpty {
-                        EmptyState(icon: "calendar.badge.plus", title: "没有关注事件", message: "可记录财报、分红、股东大会、宏观数据或自己的复盘节点。", actionTitle: "新增事件", action: presentEditor)
+
+                    CalendarSourceStrip(
+                        futuConnected: store.marketCalendarUpdatedAt != nil && (!store.marketCalendarEvents.isEmpty || store.marketCalendarFailures.isEmpty),
+                        updatedAt: store.marketCalendarUpdatedAt
+                    )
+
+                    HStack(spacing: 6) {
+                        ForEach(CalendarFilter.allCases) { item in
+                            Button(item.rawValue) { filter = item }
+                                .font(.custom("PingFangSC-Medium", size: 11))
+                                .foregroundStyle(filter == item ? WorkbenchTheme.canvas : WorkbenchTheme.secondary)
+                                .padding(.horizontal, 12)
+                                .frame(height: 30)
+                                .background(filter == item ? WorkbenchTheme.accent : WorkbenchTheme.panel)
+                                .clipShape(Capsule())
+                                .buttonStyle(.plain)
+                        }
+                        Spacer()
+                        Text("\(filteredEntries.count) 个事件")
+                            .font(.custom("PingFangSC-Regular", size: 11))
+                            .foregroundStyle(WorkbenchTheme.muted)
+                    }
+
+                    if !store.marketCalendarFailures.isEmpty {
+                        HStack(alignment: .top, spacing: 9) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .foregroundStyle(WorkbenchTheme.warning)
+                            Text(store.marketCalendarFailures.joined(separator: "；"))
+                                .font(.custom("PingFangSC-Regular", size: 11))
+                                .foregroundStyle(WorkbenchTheme.secondary)
+                            Spacer()
+                        }
+                        .padding(12)
+                        .background(WorkbenchTheme.warning.opacity(0.07))
+                        .overlay(RoundedRectangle(cornerRadius: WorkbenchLayout.panelRadius).stroke(WorkbenchTheme.warning.opacity(0.20)))
+                        .clipShape(RoundedRectangle(cornerRadius: WorkbenchLayout.panelRadius))
+                    }
+
+                    if filteredEntries.isEmpty {
+                        EmptyState(icon: "calendar.badge.plus", title: "当前筛选暂无事件", message: "可刷新 Futu 市场日历，或记录自己的财报、分红与复盘节点。", actionTitle: "新增事件", action: presentEditor)
                     } else {
                         ForEach(groupedEvents, id: \.date) { group in
                             VStack(alignment: .leading, spacing: 0) {
@@ -459,35 +544,9 @@ struct EventCalendarView: View {
                                 .background(WorkbenchTheme.panel.opacity(0.72))
 
                                 ForEach(Array(group.events.enumerated()), id: \.element.id) { index, event in
-                                    HStack(alignment: .top, spacing: 14) {
-                                        VStack(spacing: 3) {
-                                            Text(event.date.formatted(.dateTime.day()))
-                                                .font(.custom("PingFangSC-Semibold", size: 20))
-                                                .foregroundStyle(WorkbenchTheme.text)
-                                            Text(event.date.formatted(.dateTime.hour().minute()))
-                                                .font(.custom("PingFangSC-Regular", size: 10))
-                                                .foregroundStyle(WorkbenchTheme.muted)
-                                        }
-                                        .frame(width: 58)
-                                        VStack(alignment: .leading, spacing: 5) {
-                                            HStack(spacing: 7) {
-                                                Text(event.title)
-                                                    .font(.custom("PingFangSC-Semibold", size: 17).weight(.semibold))
-                                                    .foregroundStyle(WorkbenchTheme.text)
-                                                StatusPill(text: event.category, tint: WorkbenchTheme.secondary)
-                                            }
-                                            if !event.note.isEmpty {
-                                                Text(event.note)
-                                                    .font(.custom("PingFangSC-Regular", size: 11))
-                                                    .foregroundStyle(WorkbenchTheme.secondary)
-                                            }
-                                        }
-                                        Spacer()
-                                        Button(role: .destructive) { deletingEvent = event } label: { Image(systemName: "trash") }
-                                            .workbenchActionButton(.destructiveIcon)
+                                    CalendarEventRow(entry: event) {
+                                        if let local = event.localEvent { deletingEvent = local }
                                     }
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 13)
                                     if index < group.events.count - 1 {
                                         Divider().overlay(WorkbenchTheme.border)
                                     }
@@ -514,6 +573,11 @@ struct EventCalendarView: View {
             }
         }
         .background(Color.clear)
+        .task {
+            if store.marketCalendarUpdatedAt == nil {
+                await store.refreshMarketCalendar()
+            }
+        }
         .animation(.easeOut(duration: 0.14), value: showingEditor)
         .alert("删除事件？", isPresented: Binding(get: { deletingEvent != nil }, set: { if !$0 { deletingEvent = nil } })) {
             Button("取消", role: .cancel) { deletingEvent = nil }
@@ -524,17 +588,200 @@ struct EventCalendarView: View {
         }
     }
 
-    private var groupedEvents: [(date: String, events: [PortfolioEvent])] {
+    private var filteredEntries: [CalendarDisplayEntry] {
+        let personal = store.data.events.map(CalendarDisplayEntry.init)
+        let market = store.marketCalendarEvents.map(CalendarDisplayEntry.init)
+        return (personal + market)
+            .filter { entry in
+                switch filter {
+                case .all: return true
+                case .economic: return entry.kind == .economic
+                case .earnings: return entry.kind == .earnings
+                case .personal: return entry.localEvent != nil
+                }
+            }
+            .sorted { $0.date < $1.date }
+    }
+
+    private var groupedEvents: [(date: String, events: [CalendarDisplayEntry])] {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = "yyyy年M月"
-        let groups = Dictionary(grouping: store.data.events.sorted { $0.date < $1.date }) { formatter.string(from: $0.date) }
+        formatter.dateFormat = "yyyy年M月d日 EEEE"
+        let groups = Dictionary(grouping: filteredEntries) { formatter.string(from: $0.date) }
         return groups.map { ($0.key, $0.value) }.sorted { ($0.1.first?.date ?? .distantPast) < ($1.1.first?.date ?? .distantPast) }
     }
 
     private func presentEditor() {
         editorSessionID = UUID()
         showingEditor = true
+    }
+}
+
+private struct CalendarDisplayEntry: Identifiable {
+    let id: String
+    let date: Date
+    let hasExactTime: Bool
+    let title: String
+    let kind: MarketCalendarEventKind?
+    let category: String
+    let source: String
+    let detail: String
+    let importance: Int?
+    let previous: String?
+    let consensus: String?
+    let actual: String?
+    let localEvent: PortfolioEvent?
+
+    init(_ event: PortfolioEvent) {
+        id = "local:\(event.id.uuidString)"
+        date = event.date
+        hasExactTime = true
+        title = event.title
+        kind = nil
+        category = event.category
+        source = "本地记录"
+        detail = event.note
+        importance = nil
+        previous = nil
+        consensus = nil
+        actual = nil
+        localEvent = event
+    }
+
+    init(_ event: MarketCalendarEvent) {
+        id = event.id
+        date = event.date
+        hasExactTime = event.hasExactTime
+        title = event.title
+        kind = event.kind
+        category = event.kind.rawValue
+        source = event.source
+        detail = [event.country, event.market?.rawValue, event.symbol, event.detail]
+            .compactMap { value -> String? in
+                guard let value else { return nil }
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? nil : trimmed
+            }
+            .joined(separator: " · ")
+        importance = event.importance
+        previous = event.previous
+        consensus = event.consensus
+        actual = event.actual
+        localEvent = nil
+    }
+}
+
+private struct CalendarSourceStrip: View {
+    let futuConnected: Bool
+    let updatedAt: Date?
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "antenna.radiowaves.left.and.right")
+                .foregroundStyle(futuConnected ? WorkbenchTheme.negative : WorkbenchTheme.warning)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("事件数据源")
+                    .font(.custom("PingFangSC-Semibold", size: 12))
+                    .foregroundStyle(WorkbenchTheme.text)
+                Text(updatedAt.map { "最近抓取 \(Self.formatter.string(from: $0))" } ?? "等待首次连接")
+                    .font(.custom("PingFangSC-Regular", size: 10))
+                    .foregroundStyle(WorkbenchTheme.muted)
+            }
+            Spacer()
+            StatusPill(text: futuConnected ? "Futu OpenD 已连接" : "Futu OpenD 暂不可用", tint: futuConnected ? WorkbenchTheme.negative : WorkbenchTheme.warning)
+            StatusPill(text: "金十 · 需开放平台授权", tint: WorkbenchTheme.muted)
+        }
+        .padding(.horizontal, 14)
+        .frame(minHeight: 58)
+        .background(WorkbenchTheme.panel.opacity(0.76))
+        .overlay(RoundedRectangle(cornerRadius: WorkbenchLayout.panelRadius).stroke(WorkbenchTheme.border))
+        .clipShape(RoundedRectangle(cornerRadius: WorkbenchLayout.panelRadius))
+        .help("金十官方免费引用服务已停止；未配置开放平台授权时不会抓取网页数据")
+    }
+
+    private static let formatter: DateFormatter = {
+        let value = DateFormatter()
+        value.locale = Locale(identifier: "zh_CN")
+        value.dateFormat = "M月d日 HH:mm"
+        return value
+    }()
+}
+
+private struct CalendarEventRow: View {
+    let entry: CalendarDisplayEntry
+    let onDelete: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(entry.hasExactTime ? entry.date.formatted(.dateTime.hour().minute()) : "时间待定")
+                    .font(.custom("PingFangSC-Semibold", size: 13))
+                    .foregroundStyle(WorkbenchTheme.text)
+                    .monospacedDigit()
+                Text(entry.source)
+                    .font(.custom("PingFangSC-Regular", size: 9))
+                    .foregroundStyle(WorkbenchTheme.muted)
+                    .lineLimit(1)
+            }
+            .frame(width: 92, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 7) {
+                    Text(entry.title)
+                        .font(.custom("PingFangSC-Semibold", size: 14))
+                        .foregroundStyle(WorkbenchTheme.text)
+                        .lineLimit(2)
+                    StatusPill(text: entry.category, tint: entry.kind == .economic ? WorkbenchTheme.information : WorkbenchTheme.accent)
+                    if let importance = entry.importance, importance > 0 {
+                        Text(String(repeating: "★", count: min(importance, 5)))
+                            .font(.system(size: 9))
+                            .foregroundStyle(WorkbenchTheme.warning)
+                    }
+                }
+                if !entry.detail.isEmpty {
+                    Text(entry.detail)
+                        .font(.custom("PingFangSC-Regular", size: 10))
+                        .foregroundStyle(WorkbenchTheme.secondary)
+                        .lineLimit(2)
+                }
+            }
+            Spacer(minLength: 12)
+
+            if entry.previous != nil || entry.consensus != nil || entry.actual != nil {
+                HStack(spacing: 14) {
+                    CalendarValue(label: "前值", value: entry.previous)
+                    CalendarValue(label: "预期", value: entry.consensus)
+                    CalendarValue(label: "公布", value: entry.actual)
+                }
+            }
+            if entry.localEvent != nil {
+                Button(role: .destructive, action: onDelete) { Image(systemName: "trash") }
+                    .workbenchActionButton(.destructiveIcon)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+        .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+    }
+}
+
+private struct CalendarValue: View {
+    let label: String
+    let value: String?
+
+    var body: some View {
+        let displayValue = value.flatMap { $0.isEmpty ? nil : $0 }
+        VStack(alignment: .trailing, spacing: 3) {
+            Text(label)
+                .font(.custom("PingFangSC-Regular", size: 9))
+                .foregroundStyle(WorkbenchTheme.muted)
+            Text(displayValue ?? "—")
+                .font(.custom("PingFangSC-Medium", size: 11))
+                .foregroundStyle(displayValue == nil ? WorkbenchTheme.muted : WorkbenchTheme.text)
+                .monospacedDigit()
+                .lineLimit(1)
+        }
+        .frame(width: 58, alignment: .trailing)
     }
 }
 

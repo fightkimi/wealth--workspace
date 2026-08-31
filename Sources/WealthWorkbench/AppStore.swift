@@ -14,6 +14,10 @@ final class AppStore: ObservableObject {
     @Published var providerAdvisory: String?
     @Published var notice: String?
     @Published var twelveDataKeyPresent = false
+    @Published var marketCalendarEvents: [MarketCalendarEvent] = []
+    @Published var marketCalendarFailures: [String] = []
+    @Published var isRefreshingCalendar = false
+    @Published var marketCalendarUpdatedAt: Date?
 
     private let persistence: PortfolioPersisting
     private let apiKeyStore: APIKeyPersisting
@@ -104,6 +108,36 @@ final class AppStore: ObservableObject {
     func deleteEvent(_ event: PortfolioEvent) {
         data.events.removeAll { $0.id == event.id }
         persist()
+    }
+
+    func refreshMarketCalendar() async {
+        guard !isRefreshingCalendar else { return }
+        isRefreshingCalendar = true
+        defer { isRefreshingCalendar = false }
+        marketCalendarFailures = []
+
+        let calendar = Calendar(identifier: .gregorian)
+        let start = calendar.startOfDay(for: timeHealth.correctedNow)
+        guard let end = calendar.date(byAdding: .day, value: 6, to: start) else { return }
+        do {
+            let result = try await futu.fetchCalendar(
+                holdings: data.holdings,
+                host: data.settings.futuHost,
+                port: data.settings.futuPort,
+                beginDate: start,
+                endDate: end
+            )
+            marketCalendarEvents = result.events.filter { event in
+                event.kind == .earnings || (event.importance ?? 0) >= 2
+            }
+            marketCalendarFailures = result.failures
+            marketCalendarUpdatedAt = Date()
+            applyNetworkTime(result.serverDate)
+        } catch {
+            marketCalendarEvents = []
+            marketCalendarFailures = [error.localizedDescription]
+            marketCalendarUpdatedAt = Date()
+        }
     }
 
     func saveSettings(_ settings: AppSettings) {

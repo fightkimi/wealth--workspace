@@ -17,6 +17,7 @@ struct WealthWorkbenchChecks {
         try checkExchangeConversion()
         try checkMarketHoldingsSummary()
         try checkWebReaderURLPolicy()
+        try checkFutuCalendarDecoding()
         print("VERIFICATION PASSED: \(passed) checks")
     }
 
@@ -216,6 +217,19 @@ struct WealthWorkbenchChecks {
         pass("内嵌阅读器 URL 安全边界")
     }
 
+    private static func checkFutuCalendarDecoding() throws {
+        let payload = #"{"ok":true,"server_timestamp":1788165313,"failures":[],"events":[{"id":"economic:1","type":"economic","title":"中国制造业PMI","timestamp":1788139800,"date":null,"country":"中国","market":null,"symbol":null,"importance":3,"previous":"49.2","consensus":"49.6","actual":"49.8","detail":null,"source":"Futu OpenD"},{"id":"earnings:US.TEST","type":"earnings","title":"Test 财报发布","timestamp":null,"date":"2026-09-02","country":null,"market":"US","symbol":"US.TEST","importance":null,"previous":null,"consensus":"1.2","actual":null,"detail":"FY2026 Q2","source":"Futu OpenD"}]}"#
+        let fetchedAt = Date(timeIntervalSince1970: 1_788_165_400)
+        let result = try FutuQuoteService(bridgeURL: nil).decodeCalendarBridge(Data(payload.utf8), fetchedAt: fetchedAt)
+        try expect(result.events.count == 2, "Futu 日历事件应完整解析")
+        try expect(result.events[0].kind == .economic && result.events[0].importance == 3, "经济事件重要性应标准化")
+        let earnings = try result.events.first(where: { $0.kind == .earnings }).unwrap("财报事件缺失")
+        try expect(earnings.market == .us && earnings.symbol == "US.TEST", "财报事件应保留市场与证券代码")
+        try expect(!earnings.hasExactTime, "仅有发布日期时不得伪装为精确发布时间")
+        try expect(result.events.allSatisfy { $0.source == "Futu OpenD" && $0.fetchedAt == fetchedAt }, "日历来源与抓取时间应保留")
+        pass("Futu 官方事件日历解析")
+    }
+
     private static func date(_ value: String, zone: String) throws -> Date {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -253,6 +267,13 @@ private enum CheckError: LocalizedError {
     case failed(String)
     var errorDescription: String? {
         switch self { case .failed(let message): return "CHECK FAILED: \(message)" }
+    }
+}
+
+private extension Optional {
+    func unwrap(_ message: String) throws -> Wrapped {
+        guard let value = self else { throw CheckError.failed(message) }
+        return value
     }
 }
 
