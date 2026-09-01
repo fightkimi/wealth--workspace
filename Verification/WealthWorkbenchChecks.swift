@@ -30,6 +30,7 @@ struct WealthWorkbenchChecks {
         try checkOpenAICredentialFileRoundTrip()
         try await checkCredentialsRestoreAfterRelaunch()
         try checkAssistantPlacementPersistence()
+        try checkAssistantDragMotion()
         try checkAssistantResponseTableParsing()
         print("VERIFICATION PASSED: \(passed) checks")
     }
@@ -526,6 +527,17 @@ struct WealthWorkbenchChecks {
         let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue
         try expect(permissions == 0o600, "悬浮助手位置文件权限必须为 0600")
         pass("悬浮助手位置持久化")
+    }
+
+    private static func checkAssistantDragMotion() throws {
+        let proposed = AssistantDragMotion.proposedOffset(
+            base: CGSize(width: -120, height: -80),
+            translation: CGSize(width: 35, height: -20)
+        )
+        try expect(proposed == CGSize(width: -85, height: -100), "拖动预览应只合并已保存位置与当前瞬态位移")
+        try expect(!AssistantDragMotion.isDrag(CGSize(width: 3, height: 0)), "小幅手势应保留为点击")
+        try expect(AssistantDragMotion.isDrag(CGSize(width: 3, height: 3)), "超过阈值后应识别为拖动")
+        pass("悬浮助手瞬态拖动与点击阈值")
     }
 
     private static func checkAssistantResponseTableParsing() throws {

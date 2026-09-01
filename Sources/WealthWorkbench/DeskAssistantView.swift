@@ -1,5 +1,20 @@
 import SwiftUI
 
+enum AssistantDragMotion {
+    static let activationDistance: CGFloat = 4
+
+    static func proposedOffset(base: CGSize, translation: CGSize) -> CGSize {
+        CGSize(
+            width: base.width + translation.width,
+            height: base.height + translation.height
+        )
+    }
+
+    static func isDrag(_ translation: CGSize) -> Bool {
+        hypot(translation.width, translation.height) >= activationDistance
+    }
+}
+
 struct DeskAssistantOverlay: View {
     @EnvironmentObject private var store: AppStore
     @ObservedObject var news: NewsStore
@@ -10,30 +25,21 @@ struct DeskAssistantOverlay: View {
         GeometryReader { proxy in
             ZStack(alignment: .bottomTrailing) {
                 Color.clear.allowsHitTesting(false)
-                Group {
-                    if desk.isExpanded {
-                        DeskAssistantPanel(
-                            news: news,
-                            desk: desk,
-                            clampOffset: { clamp($0, in: proxy.size, element: CGSize(width: 460, height: 620)) },
-                            onOpenSettings: onOpenSettings
-                        )
-                        .frame(width: 460, height: 620)
-                    } else {
-                        DeskAssistantFab(
-                            desk: desk,
-                            clampOffset: { clamp($0, in: proxy.size, element: CGSize(width: 154, height: 46)) },
-                            action: { desk.isExpanded = true }
-                        )
-                    }
-                }
-                .offset(
-                    clamp(
-                        desk.panelOffset,
-                        in: proxy.size,
-                        element: desk.isExpanded ? CGSize(width: 460, height: 620) : CGSize(width: 154, height: 46)
+                if desk.isExpanded {
+                    DeskAssistantPanel(
+                        news: news,
+                        desk: desk,
+                        clampOffset: { clamp($0, in: proxy.size, element: CGSize(width: 460, height: 620)) },
+                        onOpenSettings: onOpenSettings
                     )
-                )
+                    .frame(width: 460, height: 620)
+                } else {
+                    DeskAssistantFab(
+                        desk: desk,
+                        clampOffset: { clamp($0, in: proxy.size, element: CGSize(width: 154, height: 46)) },
+                        action: { desk.isExpanded = true }
+                    )
+                }
             }
             .padding(.trailing, 18)
             .padding(.bottom, 18)
@@ -56,8 +62,22 @@ private struct DeskAssistantFab: View {
     let clampOffset: (CGSize) -> CGSize
     let action: () -> Void
     @State private var hovered = false
-    @State private var dragStart: CGSize = .zero
-    @State private var didDrag = false
+    // Keep high-frequency samples local; commit the persisted position once on end.
+    // Source: https://developer.apple.com/documentation/swiftui/adding-interactivity-with-gestures
+    @GestureState private var dragTranslation: CGSize = .zero
+
+    private var isDragging: Bool {
+        AssistantDragMotion.isDrag(dragTranslation)
+    }
+
+    private var displayOffset: CGSize {
+        clampOffset(
+            AssistantDragMotion.proposedOffset(
+                base: desk.panelOffset,
+                translation: dragTranslation
+            )
+        )
+    }
 
     var body: some View {
         HStack(spacing: 9) {
@@ -87,39 +107,34 @@ private struct DeskAssistantFab: View {
                 endPoint: .bottomTrailing
             )
         )
-        .overlay(Capsule().stroke(hovered ? WorkbenchTheme.accent.opacity(0.62) : WorkbenchTheme.strongBorder, lineWidth: 1))
+        .overlay(Capsule().stroke(hovered && !isDragging ? WorkbenchTheme.accent.opacity(0.62) : WorkbenchTheme.strongBorder, lineWidth: 1))
         .clipShape(Capsule())
-        .shadow(color: Color.black.opacity(hovered ? 0.45 : 0.30), radius: hovered ? 17 : 11, y: 7)
-        .offset(y: hovered ? -2 : 0)
+        .compositingGroup()
+        .shadow(color: Color.black.opacity(0.32), radius: 12, y: 7)
+        .offset(x: displayOffset.width, y: displayOffset.height)
         .contentShape(Capsule())
         .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { value in
-                    let distance = hypot(value.translation.width, value.translation.height)
-                    guard distance >= 4 else { return }
-                    if !didDrag {
-                        dragStart = desk.panelOffset
-                        didDrag = true
-                    }
-                    desk.move(
-                        to: clampOffset(
-                            CGSize(
-                                width: dragStart.width + value.translation.width,
-                                height: dragStart.height + value.translation.height
-                            )
-                        )
-                    )
+            DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                .updating($dragTranslation) { value, state, transaction in
+                    transaction.animation = nil
+                    transaction.disablesAnimations = true
+                    state = value.translation
                 }
-                .onEnded { _ in
-                    if didDrag {
+                .onEnded { value in
+                    if AssistantDragMotion.isDrag(value.translation) {
+                        let destination = AssistantDragMotion.proposedOffset(
+                            base: desk.panelOffset,
+                            translation: value.translation
+                        )
+                        desk.move(
+                            to: clampOffset(destination)
+                        )
                         desk.persistPlacement()
                     } else {
                         action()
                     }
-                    didDrag = false
                 }
         )
-        .animation(.easeOut(duration: 0.14), value: hovered)
         .onHover { hovered = $0 }
         .help("点击打开 · 拖动移动 · ⌘L")
         .accessibilityLabel("打开 AUREL 投资助手")
@@ -136,7 +151,16 @@ private struct DeskAssistantPanel: View {
     @ObservedObject var desk: DeskAssistantStore
     let clampOffset: (CGSize) -> CGSize
     let onOpenSettings: () -> Void
-    @State private var dragStart: CGSize = .zero
+    @GestureState private var dragTranslation: CGSize = .zero
+
+    private var displayOffset: CGSize {
+        clampOffset(
+            AssistantDragMotion.proposedOffset(
+                base: desk.panelOffset,
+                translation: dragTranslation
+            )
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -161,7 +185,9 @@ private struct DeskAssistantPanel: View {
             )
             .frame(width: 240, height: 1)
         }
+        .compositingGroup()
         .shadow(color: Color.black.opacity(0.54), radius: 38, x: 0, y: 22)
+        .offset(x: displayOffset.width, y: displayOffset.height)
         .allowsHitTesting(true)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("投资助手")
@@ -223,23 +249,23 @@ private struct DeskAssistantPanel: View {
         .padding(.vertical, 11)
         .contentShape(Rectangle())
         .gesture(
-            DragGesture()
-                .onChanged { value in
-                    desk.move(
-                        to: clampOffset(
-                            CGSize(
-                                width: dragStart.width + value.translation.width,
-                                height: dragStart.height + value.translation.height
-                            )
-                        )
-                    )
+            DragGesture(coordinateSpace: .global)
+                .updating($dragTranslation) { value, state, transaction in
+                    transaction.animation = nil
+                    transaction.disablesAnimations = true
+                    state = value.translation
                 }
-                .onEnded { _ in
-                    dragStart = desk.panelOffset
+                .onEnded { value in
+                    let destination = AssistantDragMotion.proposedOffset(
+                        base: desk.panelOffset,
+                        translation: value.translation
+                    )
+                    desk.move(
+                        to: clampOffset(destination)
+                    )
                     desk.persistPlacement()
                 }
         )
-        .onAppear { dragStart = desk.panelOffset }
     }
 
     private var skillStrip: some View {
