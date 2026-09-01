@@ -644,6 +644,21 @@ struct WealthWorkbenchChecks {
         try expect(proposed == CGSize(width: -85, height: -100), "拖动预览应只合并已保存位置与当前瞬态位移")
         try expect(!AssistantDragMotion.isDrag(CGSize(width: 3, height: 0)), "小幅手势应保留为点击")
         try expect(AssistantDragMotion.isDrag(CGSize(width: 3, height: 3)), "超过阈值后应识别为拖动")
+
+        var session = AssistantDragSession()
+        session.update(
+            base: CGSize(width: -26, height: -164),
+            translation: CGSize(width: -120, height: -60),
+            clamp: { $0 }
+        )
+        try expect(session.preview == CGSize(width: -146, height: -224), "已有保存位置时拖动预览必须从真实位置继续")
+        let destination = session.finish(
+            base: .zero,
+            translation: CGSize(width: -180, height: -90),
+            clamp: { $0 }
+        )
+        try expect(destination == CGSize(width: -206, height: -254), "拖动结束必须沿用手势开始时的位置，不能跳回右下角")
+        try expect(session.preview == nil, "拖动结束后必须清除瞬态预览")
         pass("悬浮助手瞬态拖动与点击阈值")
     }
 
