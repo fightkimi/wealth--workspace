@@ -930,6 +930,8 @@ struct SettingsView: View {
     @EnvironmentObject private var store: AppStore
     @State private var draft = AppSettings()
     @State private var apiKey = ""
+    @State private var spaceXAIKey = ""
+    @State private var openAIKey = ""
     @State private var showingCashEditor = false
     @State private var cashEditorSessionID = UUID()
     @State private var deletingCash: CashBalance?
@@ -939,6 +941,7 @@ struct SettingsView: View {
         case futuHost
         case futuPort
         case apiKey
+        case assistantKey
     }
 
     var body: some View {
@@ -1107,6 +1110,52 @@ struct SettingsView: View {
                     .workbenchActionButton(.secondary)
                     .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
+
+                Divider().overlay(WorkbenchTheme.border)
+
+                HStack(alignment: .center, spacing: 12) {
+                    settingsGroupTitle("AI 投资助手", icon: "sparkles")
+                    Spacer()
+                    StatusPill(
+                        text: "\(store.assistantProvider.displayName) · \(store.assistantProvider.model)",
+                        tint: WorkbenchTheme.accent
+                    )
+                    StatusPill(
+                        text: store.assistantKeyAvailable ? "凭证可用" : "尚未配置 API Key",
+                        tint: store.assistantKeyAvailable ? WorkbenchTheme.negative : WorkbenchTheme.warning
+                    )
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    settingsLabel("AI 服务")
+                    WorkbenchSegmentSelector(
+                        selection: assistantProviderBinding,
+                        options: AssistantProvider.allCases,
+                        accessibilityLabel: "AI 服务",
+                        label: { "\($0.displayName) · \($0.model)" }
+                    )
+                }
+
+                Text(assistantProviderDetail)
+                    .font(.custom("PingFangSC-Regular", size: 10))
+                    .foregroundStyle(WorkbenchTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if store.assistantProvider == .openAI {
+                    assistantKeyEditor(
+                        provider: .openAI,
+                        key: $openAIKey,
+                        keyPresent: store.openAIKeyPresent,
+                        keyAvailable: store.openAIKeyAvailable
+                    )
+                } else {
+                    assistantKeyEditor(
+                        provider: .spaceXAI,
+                        key: $spaceXAIKey,
+                        keyPresent: store.spaceXAIKeyPresent,
+                        keyAvailable: store.spaceXAIKeyAvailable
+                    )
+                }
             }
             .padding(14)
             .background(WorkbenchTheme.panel.opacity(0.82))
@@ -1197,6 +1246,102 @@ struct SettingsView: View {
         }
     }
 
+    private var assistantProviderBinding: Binding<AssistantProvider> {
+        Binding(
+            get: { store.assistantProvider },
+            set: { provider in
+                store.setAssistantProvider(provider)
+                draft.assistantProvider = provider
+                openAIKey = ""
+                spaceXAIKey = ""
+                focusedInput = nil
+            }
+        )
+    }
+
+    private var assistantProviderDetail: String {
+        switch store.assistantProvider {
+        case .openAI:
+            return "使用 OpenAI Responses API 与 GPT-5.6-sol（medium 推理强度，API 不保存响应）。发送对话时会附带当前持仓快照；Key 只保存在本机 0600 文件中。"
+        case .spaceXAI:
+            return "使用 SpaceXAI Chat Completions 与 grok-4.6。发送对话时会附带当前持仓快照；Key 只保存在本机 0600 文件中。"
+        }
+    }
+
+    private func assistantKeyEditor(
+        provider: AssistantProvider,
+        key: Binding<String>,
+        keyPresent: Bool,
+        keyAvailable: Bool
+    ) -> some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack {
+                    settingsLabel(provider.keyLabel)
+                    Spacer()
+                    if keyAvailable && !keyPresent {
+                        Text("使用环境变量 \(provider.environmentVariable)")
+                            .font(.custom("PingFangSC-Regular", size: 9))
+                            .foregroundStyle(WorkbenchTheme.muted)
+                    }
+                }
+                ZStack(alignment: .leading) {
+                    SecureField(
+                        keyPresent && key.wrappedValue.isEmpty && focusedInput != .assistantKey
+                            ? ""
+                            : (keyPresent ? "输入新 Key 以替换本地凭证" : "输入 \(provider.keyLabel)"),
+                        text: key
+                    )
+                    .focused($focusedInput, equals: .assistantKey)
+                    .workbenchInputField(isFocused: focusedInput == .assistantKey)
+                    .accessibilityLabel(provider.keyLabel)
+                    .accessibilityValue(
+                        keyPresent && key.wrappedValue.isEmpty
+                            ? "已保存到应用专属本地文件"
+                            : (key.wrappedValue.isEmpty ? "尚未配置" : "已输入新凭证")
+                    )
+
+                    if keyPresent, key.wrappedValue.isEmpty, focusedInput != .assistantKey {
+                        HStack(spacing: 8) {
+                            Image(systemName: "lock.fill")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(WorkbenchTheme.negative)
+                            Text("••••••••••••••••")
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(WorkbenchTheme.text)
+                            Text("本地已保存 · 输入新 Key 可替换")
+                                .font(.custom("PingFangSC-Regular", size: 10))
+                                .foregroundStyle(WorkbenchTheme.muted)
+                        }
+                        .padding(.horizontal, 11)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                    }
+                }
+            }
+            Button(keyPresent ? "移除 Key" : "清空") {
+                key.wrappedValue = ""
+                focusedInput = nil
+                guard keyPresent else { return }
+                switch provider {
+                case .openAI: store.saveOpenAIKey("")
+                case .spaceXAI: store.saveSpaceXAIKey("")
+                }
+            }
+            .workbenchActionButton(keyPresent ? .destructive : .secondary)
+            Button("保存 Key") {
+                switch provider {
+                case .openAI: store.saveOpenAIKey(key.wrappedValue)
+                case .spaceXAI: store.saveSpaceXAIKey(key.wrappedValue)
+                }
+                key.wrappedValue = ""
+                focusedInput = nil
+            }
+            .workbenchActionButton(.secondary)
+            .disabled(key.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+    }
+
     private func refreshLabel(_ seconds: Int) -> String {
         switch seconds {
         case 30: return "30 秒"
@@ -1267,8 +1412,13 @@ struct SettingsView: View {
                 .font(.custom("PingFangSC-Semibold", size: 19).weight(.semibold))
                 .foregroundStyle(WorkbenchTheme.text)
             SettingsDatum(label: "资产数据文件", value: store.dataFilePath)
-            SettingsDatum(label: "API Key", value: store.twelveDataKeyPresent ? "已保存到本地文件（仅当前用户可读）" : "未配置")
-            SettingsDatum(label: "API Key 文件", value: store.apiKeyFilePath)
+            SettingsDatum(label: "行情 Key", value: store.twelveDataKeyPresent ? "已保存到本地文件（仅当前用户可读）" : "未配置")
+            SettingsDatum(label: "行情 Key 文件", value: store.apiKeyFilePath)
+            SettingsDatum(label: "AI 服务", value: "\(store.assistantProvider.displayName) · \(store.assistantProvider.model)")
+            SettingsDatum(label: "OpenAI Key", value: store.openAIKeyPresent ? "已保存到本地文件（仅当前用户可读）" : (store.openAIKeyAvailable ? "使用环境变量 OPENAI_API_KEY" : "未配置"))
+            SettingsDatum(label: "OpenAI Key 文件", value: store.openAIKeyFilePath)
+            SettingsDatum(label: "SpaceXAI Key", value: store.spaceXAIKeyPresent ? "已保存到本地文件（仅当前用户可读）" : (store.spaceXAIKeyAvailable ? "使用环境变量 XAI_API_KEY" : "未配置"))
+            SettingsDatum(label: "SpaceXAI 文件", value: store.spaceXAIKeyFilePath)
             SettingsDatum(label: "网络时间", value: store.timeHealth.serverDate.map { DisplayFormat.dateTime($0) } ?? "尚未校验")
             SettingsDatum(label: "时间偏差", value: store.timeHealth.serverDate == nil ? "尚未校验" : "\(Int(store.timeHealth.offset)) 秒")
             SettingsDatum(label: "汇率来源", value: store.exchangeRates.map { "\($0.source) · \(DisplayFormat.shortDate($0.date))" } ?? "暂无数据")
@@ -1287,7 +1437,7 @@ private struct SettingsDatum: View {
     let value: String
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(label).foregroundStyle(WorkbenchTheme.muted).frame(width: 100, alignment: .leading)
+            Text(label).foregroundStyle(WorkbenchTheme.muted).frame(width: 108, alignment: .leading)
             Text(value).foregroundStyle(WorkbenchTheme.secondary).textSelection(.enabled)
             Spacer()
         }

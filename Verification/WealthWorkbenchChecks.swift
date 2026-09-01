@@ -20,6 +20,15 @@ struct WealthWorkbenchChecks {
         try checkWebReaderURLPolicy()
         try checkFutuCalendarDecoding()
         try await checkNewsCacheFallback()
+        try checkInvestmentSkillCatalog()
+        try checkInvestmentSkillRouter()
+        try checkDeskSnapshotOmitsMissingQuotes()
+        try checkSpaceXAIRequestAndStreamParser()
+        try checkSpaceXAIKeyFileRoundTrip()
+        try checkAssistantProviderCompatibility()
+        try checkOpenAIRequestAndStreamParser()
+        try checkOpenAIKeyFileRoundTrip()
+        try checkAssistantResponseTableParsing()
         print("VERIFICATION PASSED: \(passed) checks")
     }
 
@@ -264,6 +273,217 @@ struct WealthWorkbenchChecks {
         try expect(store.items == [item], "网络失败时不得清空已显示的资讯缓存")
         try expect(store.advisoryMessage != nil && store.errorMessage == nil, "缓存回退必须明确标注而不是伪装为实时资讯")
         pass("资讯预载与缓存回退")
+    }
+
+    private static func checkInvestmentSkillCatalog() throws {
+        let ids = InvestmentSkillCatalog.skills.map(\.id)
+        try expect(
+            ids == [
+                .portfolioReview, .portfolioRisk, .positionSizing, .preDecision,
+                .positionReview, .investmentChecklist, .qualityScreen, .financialHealth,
+                .valuation, .peterLynch, .bearCase, .bottleneck,
+                .earningsReview, .earningsPreview, .newsPulse, .macroEvent, .thesisTracker
+            ],
+            "助手应内置公开投研框架蒸馏后的完整技能目录"
+        )
+        try expect(InvestmentSkillCatalog.skills.count == 17, "公开技能应收成 17 个可调用模块")
+        let compiled = InvestmentSkillCatalog.compile(skillIDs: [.auto, .portfolioReview, .portfolioReview])
+        try expect(compiled.contains("AUREL Desk") && compiled.contains("组合审视"), "系统提示应包含宪章与启用技能")
+        try expect(compiled.contains("暂无数据") && compiled.contains("不得把收盘价说成盘前"), "宪章必须保留行情纪律")
+        try expect(!compiled.contains("## 技能：自动"), "自动路由不应作为技能正文写入")
+        pass("投资助手技能目录")
+    }
+
+    private static func checkInvestmentSkillRouter() throws {
+        try expect(
+            InvestmentSkillRouter.resolve(query: "审视当前组合", selected: .auto, hasHoldings: true) == [.portfolioReview],
+            "组合问题应路由到组合审视"
+        )
+        try expect(
+            InvestmentSkillRouter.resolve(query: "为什么跌这么多", selected: .auto, hasHoldings: true) == [.newsPulse],
+            "异动问题应路由到新闻脉搏"
+        )
+        try expect(
+            InvestmentSkillRouter.resolve(query: "随便问问", selected: .investmentChecklist, hasHoldings: true) == [.investmentChecklist],
+            "手动选择的技能应覆盖自动路由"
+        )
+        try expect(
+            InvestmentSkillRouter.resolve(query: "你好", selected: .auto, hasHoldings: false) == [.investmentChecklist],
+            "空账户默认走买入清单"
+        )
+        try expect(
+            InvestmentSkillRouter.resolve(query: "给最大持仓写一份空方红队", selected: .auto, hasHoldings: true).first == .bearCase,
+            "空方问题应优先路由到空方红队"
+        )
+        try expect(
+            InvestmentSkillRouter.resolve(query: "这只股票该买多少", selected: .auto, hasHoldings: true).first == .positionSizing,
+            "规模问题应优先路由到仓位规模而不是买入清单"
+        )
+        try expect(
+            !InvestmentSkillRouter.resolve(query: "这只股票该买多少", selected: .auto, hasHoldings: true).contains(.investmentChecklist),
+            "「该买多少」不得误入买入清单"
+        )
+        try expect(
+            InvestmentSkillRouter.resolve(query: "Piotroski 和 ROIC 怎么样", selected: .auto, hasHoldings: true) == [.financialHealth],
+            "财务质量问题应路由到财务体检"
+        )
+        pass("投资助手技能路由")
+    }
+
+    private static func checkDeskSnapshotOmitsMissingQuotes() throws {
+        let estimated = Holding(market: .us, name: "Test Co", code: "TEST", sector: "科技", quantity: nil, averageCost: 10, investedCost: 100, currency: .usd)
+        let metrics = HoldingMetrics(
+            holding: estimated,
+            quote: nil,
+            marketValue: nil,
+            dailyProfit: nil,
+            totalProfit: nil,
+            totalReturn: nil,
+            weight: nil
+        )
+        let snapshot = DeskSnapshotBuilder.make(
+            now: Date(timeIntervalSince1970: 1_788_165_400),
+            settings: AppSettings(baseCurrency: .cny),
+            summary: PortfolioSummary(totalAssets: nil, securitiesAssets: nil, cashAssets: 0, dailyProfit: nil, totalProfit: nil, totalReturn: nil, currency: .cny, isPartial: true),
+            holdings: [metrics],
+            failures: [
+                estimated.quoteKey: QuoteFailure(key: estimated.quoteKey, message: "接口失败", source: "测试来源", fetchedAt: Date(timeIntervalSince1970: 1_788_165_400))
+            ],
+            cash: [],
+            events: [
+                MarketCalendarEvent(
+                    id: "earnings:US.TEST",
+                    date: Date(timeIntervalSince1970: 1_788_249_600),
+                    hasExactTime: false,
+                    title: "Test 财报",
+                    kind: .earnings,
+                    country: nil,
+                    market: .us,
+                    symbol: "US.TEST",
+                    importance: nil,
+                    previous: nil,
+                    consensus: nil,
+                    actual: nil,
+                    detail: nil,
+                    source: "Futu OpenD",
+                    fetchedAt: Date(timeIntervalSince1970: 1_788_165_400)
+                )
+            ],
+            news: [],
+            benchmarks: [],
+            providerStatus: "暂无可用持仓行情",
+            lastRefreshAt: nil,
+            timeHealth: TimeHealth(),
+            exchangeRates: nil,
+            calendarUpdatedAt: nil,
+            calendarFailures: []
+        )
+        try expect(snapshot.contains("暂无数据"), "缺行情时快照必须写暂无数据")
+        try expect(snapshot.contains("估算持仓"), "无数量持仓必须标明估算")
+        try expect(snapshot.contains("时间待定"), "仅有日期的财报不得伪装精确时间")
+        try expect(!snapshot.contains("Bearer") && !DeskSnapshotBuilder.containsCredentialLeak(snapshot), "快照不得泄漏 API Key")
+        pass("投资助手持仓快照纪律")
+    }
+
+    private static func checkSpaceXAIRequestAndStreamParser() throws {
+        let request = try SpaceXAIRequestBuilder.makeURLRequest(
+            apiKey: "test-key-not-a-real-secret",
+            messages: [SpaceXAIMessage(role: "user", content: "hello")],
+            stream: true
+        )
+        try expect(request.url?.absoluteString == "https://api.x.ai/v1/chat/completions", "助手应请求 SpaceXAI Chat Completions")
+        try expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-key-not-a-real-secret", "请求应使用 Bearer 本地凭证")
+        let body = try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
+        try expect(body?["model"] as? String == "grok-4.6", "默认模型应为 grok-4.6")
+        try expect(try SpaceXAISSEParser.contentDelta(from: #"data: {"choices":[{"delta":{"content":"你好"}}]}"#) == "你好", "SSE 增量应解析文本")
+        try expect(try SpaceXAISSEParser.contentDelta(from: "data: [DONE]") == nil, "SSE 结束标记不应产出文本")
+        do {
+            _ = try SpaceXAIRequestBuilder.makeURLRequest(apiKey: "   ", messages: [])
+            throw CheckError.failed("空 API Key 必须拒绝发请求")
+        } catch SpaceXAIClientError.missingAPIKey {
+            // expected
+        }
+        pass("SpaceXAI 请求与流式解析")
+    }
+
+    private static func checkSpaceXAIKeyFileRoundTrip() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wealth-xai-key-check-\(UUID().uuidString)", isDirectory: true)
+        let fileURL = directory.appendingPathComponent("xai-api-key.txt")
+        let store = APIKeyFileStore(filename: "xai-api-key.txt", fileURL: fileURL)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        try store.save("test-xai-key-not-a-real-secret")
+        try expect(try APIKeyFileStore(filename: "xai-api-key.txt", fileURL: fileURL).load() == "test-xai-key-not-a-real-secret", "SpaceXAI Key 应可从本地文件还原")
+        let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+        let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue
+        try expect(permissions == 0o600, "SpaceXAI 凭证文件权限必须为 0600")
+        pass("SpaceXAI API Key 本地权限")
+    }
+
+    private static func checkAssistantProviderCompatibility() throws {
+        try expect(AppSettings().assistantProvider == .openAI, "新安装默认应提供 OpenAI GPT-5.6-sol")
+        try expect(AssistantProvider.openAI.model == "gpt-5.6-sol", "OpenAI 助手模型应锁定为 gpt-5.6-sol")
+        let legacy = Data(#"{"baseCurrency":"CNY","provider":"自动（按优先级）","futuHost":"127.0.0.1","futuPort":11111,"allowPublicFallback":true,"refreshIntervalSeconds":60}"#.utf8)
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: legacy)
+        try expect(decoded.assistantProvider == .spaceXAI, "旧配置迁移时应继续使用原来的 SpaceXAI")
+        pass("助手服务选择与旧配置迁移")
+    }
+
+    private static func checkOpenAIRequestAndStreamParser() throws {
+        let request = try OpenAIRequestBuilder.makeURLRequest(
+            apiKey: "test-openai-key-not-a-real-secret",
+            messages: [AssistantMessage(role: "user", content: "hello")],
+            stream: true
+        )
+        try expect(request.url?.absoluteString == "https://api.openai.com/v1/responses", "OpenAI 助手应使用 Responses API")
+        try expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-openai-key-not-a-real-secret", "OpenAI 请求应使用 Bearer 本地凭证")
+        let body = try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
+        try expect(body?["model"] as? String == "gpt-5.6-sol", "OpenAI 默认模型应为 gpt-5.6-sol")
+        try expect(body?["store"] as? Bool == false, "投资助手响应不应由 API 持久化")
+        try expect((body?["reasoning"] as? [String: Any])?["effort"] as? String == "medium", "OpenAI 应使用 medium 推理强度")
+        try expect((body?["text"] as? [String: Any])?["verbosity"] as? String == "medium", "OpenAI 应使用 medium 输出详略")
+        try expect(try OpenAISSEParser.contentDelta(from: #"data: {"type":"response.output_text.delta","delta":"你好"}"#) == "你好", "Responses SSE 增量应解析文本")
+        try expect(try OpenAISSEParser.contentDelta(from: #"data: {"type":"response.completed","response":{}}"#) == nil, "Responses 完成事件不应重复输出文本")
+        do {
+            _ = try OpenAIRequestBuilder.makeURLRequest(apiKey: "   ", messages: [])
+            throw CheckError.failed("OpenAI 空 API Key 必须拒绝发请求")
+        } catch OpenAIClientError.missingAPIKey {
+            // expected
+        }
+        pass("OpenAI Responses 请求与流式解析")
+    }
+
+    private static func checkOpenAIKeyFileRoundTrip() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wealth-openai-key-check-\(UUID().uuidString)", isDirectory: true)
+        let fileURL = directory.appendingPathComponent("openai-api-key.txt")
+        let store = APIKeyFileStore(filename: "openai-api-key.txt", fileURL: fileURL)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        try store.save("test-openai-key-not-a-real-secret")
+        try expect(try APIKeyFileStore(filename: "openai-api-key.txt", fileURL: fileURL).load() == "test-openai-key-not-a-real-secret", "OpenAI Key 应可从本地文件还原")
+        let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+        let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue
+        try expect(permissions == 0o600, "OpenAI 凭证文件权限必须为 0600")
+        pass("OpenAI API Key 本地权限")
+    }
+
+    private static func checkAssistantResponseTableParsing() throws {
+        let markdown = """
+        ## 组合概览
+        | 标的 | 权重 | 判断 |
+        | --- | ---: | --- |
+        | AAPL | 38% | 偏高 |
+        | 腾讯 | 22% | 正常 |
+
+        - 最大风险：集中度
+        """
+        let blocks = AssistantResponseParser.parse(markdown)
+        try expect(blocks.contains(.heading("组合概览")), "回复标题应独立渲染")
+        try expect(blocks.contains(.table(headers: ["标的", "权重", "判断"], rows: [["AAPL", "38%", "偏高"], ["腾讯", "22%", "正常"]])), "Markdown 表格应转换为结构化表格")
+        try expect(blocks.contains(.bullets(["最大风险：集中度"])), "回复要点应独立渲染")
+        pass("助手结构化表格解析")
     }
 
     private static func date(_ value: String, zone: String) throws -> Date {

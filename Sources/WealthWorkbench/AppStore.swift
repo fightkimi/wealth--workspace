@@ -14,6 +14,8 @@ final class AppStore: ObservableObject {
     @Published var providerAdvisory: String?
     @Published var notice: String?
     @Published var twelveDataKeyPresent = false
+    @Published var spaceXAIKeyPresent = false
+    @Published var openAIKeyPresent = false
     @Published var marketCalendarEvents: [MarketCalendarEvent] = []
     @Published var marketCalendarFailures: [String] = []
     @Published var isRefreshingCalendar = false
@@ -21,7 +23,11 @@ final class AppStore: ObservableObject {
 
     private let persistence: PortfolioPersisting
     private let apiKeyStore: APIKeyPersisting
+    private let spaceXAIKeyStore: APIKeyPersisting
+    private let openAIKeyStore: APIKeyPersisting
     private var twelveDataAPIKey: String?
+    private var spaceXAIAPIKey: String?
+    private var openAIAPIKey: String?
     private let tencent: TencentQuoteService
     private let twelve: TwelveDataQuoteService
     private let futu: FutuQuoteService
@@ -30,6 +36,8 @@ final class AppStore: ObservableObject {
     init(
         persistence: PortfolioPersisting = PortfolioFileStore(),
         apiKeyStore: APIKeyPersisting = APIKeyFileStore(),
+        spaceXAIKeyStore: APIKeyPersisting = APIKeyFileStore(filename: "xai-api-key.txt"),
+        openAIKeyStore: APIKeyPersisting = APIKeyFileStore(filename: "openai-api-key.txt"),
         tencent: TencentQuoteService = TencentQuoteService(),
         twelve: TwelveDataQuoteService = TwelveDataQuoteService(),
         futu: FutuQuoteService = FutuQuoteService(),
@@ -37,6 +45,8 @@ final class AppStore: ObservableObject {
     ) {
         self.persistence = persistence
         self.apiKeyStore = apiKeyStore
+        self.spaceXAIKeyStore = spaceXAIKeyStore
+        self.openAIKeyStore = openAIKeyStore
         self.tencent = tencent
         self.twelve = twelve
         self.futu = futu
@@ -53,11 +63,54 @@ final class AppStore: ObservableObject {
         } catch {
             self.notice = "本地 API Key 文件读取失败：\(error.localizedDescription)"
         }
+        do {
+            self.spaceXAIAPIKey = try spaceXAIKeyStore.load()
+            self.spaceXAIKeyPresent = self.spaceXAIAPIKey?.isEmpty == false
+        } catch {
+            if notice == nil {
+                notice = "SpaceXAI API Key 文件读取失败：\(error.localizedDescription)"
+            }
+        }
+        do {
+            self.openAIAPIKey = try openAIKeyStore.load()
+            self.openAIKeyPresent = self.openAIAPIKey?.isEmpty == false
+        } catch {
+            if notice == nil {
+                notice = "OpenAI API Key 文件读取失败：\(error.localizedDescription)"
+            }
+        }
     }
 
     var dataFilePath: String { persistence.displayPath }
     var apiKeyFilePath: String { apiKeyStore.displayPath }
+    var spaceXAIKeyFilePath: String { spaceXAIKeyStore.displayPath }
+    var openAIKeyFilePath: String { openAIKeyStore.displayPath }
     var futuBridgeInstalled: Bool { futu.isBridgeInstalled }
+    var spaceXAIKeyAvailable: Bool { resolvedSpaceXAIKey() != nil }
+    var openAIKeyAvailable: Bool { resolvedOpenAIKey() != nil }
+    var assistantProvider: AssistantProvider { data.settings.assistantProvider }
+    var assistantKeyAvailable: Bool { resolvedAssistantKey() != nil }
+
+    func resolvedAssistantKey(for provider: AssistantProvider? = nil) -> String? {
+        switch provider ?? assistantProvider {
+        case .openAI: return resolvedOpenAIKey()
+        case .spaceXAI: return resolvedSpaceXAIKey()
+        }
+    }
+
+    func resolvedSpaceXAIKey() -> String? {
+        if let spaceXAIAPIKey, !spaceXAIAPIKey.isEmpty { return spaceXAIAPIKey }
+        let environment = ProcessInfo.processInfo.environment["XAI_API_KEY"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return environment?.isEmpty == false ? environment : nil
+    }
+
+    func resolvedOpenAIKey() -> String? {
+        if let openAIAPIKey, !openAIAPIKey.isEmpty { return openAIAPIKey }
+        let environment = ProcessInfo.processInfo.environment["OPENAI_API_KEY"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return environment?.isEmpty == false ? environment : nil
+    }
 
     func persist() {
         do {
@@ -146,6 +199,50 @@ final class AppStore: ObservableObject {
         persist()
         if baseChanged { exchangeRates = nil }
         Task { await refreshQuotes() }
+    }
+
+    func setAssistantProvider(_ provider: AssistantProvider) {
+        guard data.settings.assistantProvider != provider else { return }
+        data.settings.assistantProvider = provider
+        persist()
+    }
+
+    func saveOpenAIKey(_ value: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            if trimmed.isEmpty {
+                try openAIKeyStore.delete()
+                openAIAPIKey = nil
+                openAIKeyPresent = false
+                notice = "OpenAI API Key 已从本地文件移除"
+            } else {
+                try openAIKeyStore.save(trimmed)
+                openAIAPIKey = trimmed
+                openAIKeyPresent = true
+                notice = "OpenAI API Key 已保存到应用专属本地文件"
+            }
+        } catch {
+            notice = "OpenAI API Key 本地保存失败：\(error.localizedDescription)"
+        }
+    }
+
+    func saveSpaceXAIKey(_ value: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            if trimmed.isEmpty {
+                try spaceXAIKeyStore.delete()
+                spaceXAIAPIKey = nil
+                spaceXAIKeyPresent = false
+                notice = "SpaceXAI API Key 已从本地文件移除"
+            } else {
+                try spaceXAIKeyStore.save(trimmed)
+                spaceXAIAPIKey = trimmed
+                spaceXAIKeyPresent = true
+                notice = "SpaceXAI API Key 已保存到应用专属本地文件"
+            }
+        } catch {
+            notice = "SpaceXAI API Key 本地保存失败：\(error.localizedDescription)"
+        }
     }
 
     func saveTwelveDataKey(_ value: String) {

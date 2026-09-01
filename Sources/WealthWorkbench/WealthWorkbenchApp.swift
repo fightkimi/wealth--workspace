@@ -19,6 +19,12 @@ struct WealthWorkbenchApp: App {
                 Button("刷新行情") { Task { await store.refreshQuotes() } }
                     .keyboardShortcut("r", modifiers: .command)
             }
+            CommandGroup(after: .sidebar) {
+                Button("投资助手") {
+                    NotificationCenter.default.post(name: .toggleDeskAssistant, object: nil)
+                }
+                .keyboardShortcut("l", modifiers: .command)
+            }
         }
     }
 }
@@ -26,6 +32,7 @@ struct WealthWorkbenchApp: App {
 struct WorkbenchRootView: View {
     @EnvironmentObject private var store: AppStore
     @StateObject private var newsStore = NewsStore()
+    @StateObject private var desk = DeskAssistantStore()
     @State private var selection: AppSection = .overview
     @State private var showingNotice = false
 
@@ -54,6 +61,17 @@ struct WorkbenchRootView: View {
                     .id(selection)
                     .transition(.opacity)
             }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            DeskAssistantOverlay(news: newsStore, desk: desk, onOpenSettings: { selection = .settings })
+                .environmentObject(store)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleDeskAssistant)) { _ in
+            desk.toggle()
+        }
+        .onChange(of: store.data.settings.assistantProvider) { _ in
+            // Do not forward an existing provider's transcript to a newly selected service.
+            desk.clear()
         }
         .animation(.easeOut(duration: 0.14), value: selection)
         .task {
@@ -171,6 +189,15 @@ private struct WorkbenchTopBar: View {
             .foregroundStyle(WorkbenchTheme.secondary)
 
             Button {
+                NotificationCenter.default.post(name: .toggleDeskAssistant, object: nil)
+            } label: {
+                Image(systemName: "text.bubble.fill")
+            }
+            .workbenchActionButton(.icon)
+            .help("投资助手 ⌘L")
+            .accessibilityLabel("打开投资助手")
+
+            Button {
                 Task { await store.refreshQuotes() }
             } label: {
                 Image(systemName: "arrow.clockwise")
@@ -222,4 +249,8 @@ private struct TopNavigationItem: View {
         .accessibilityLabel(section.rawValue)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
+}
+
+extension Notification.Name {
+    static let toggleDeskAssistant = Notification.Name("AUREL.toggleDeskAssistant")
 }

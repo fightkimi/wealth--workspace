@@ -17,6 +17,10 @@ struct APIKeyFileStore: APIKeyPersisting {
     let fileURL: URL
 
     init(fileURL: URL? = nil) {
+        self.init(filename: "twelve-data-api-key.txt", fileURL: fileURL)
+    }
+
+    init(filename: String, fileURL: URL? = nil) {
         if let fileURL {
             self.fileURL = fileURL
         } else {
@@ -24,7 +28,7 @@ struct APIKeyFileStore: APIKeyPersisting {
             self.fileURL = support
                 .appendingPathComponent("WealthWorkbench", isDirectory: true)
                 .appendingPathComponent("Credentials", isDirectory: true)
-                .appendingPathComponent("twelve-data-api-key.txt")
+                .appendingPathComponent(filename)
         }
     }
 

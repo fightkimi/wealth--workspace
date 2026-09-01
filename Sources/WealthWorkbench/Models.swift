@@ -183,6 +183,41 @@ enum QuoteProvider: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum AssistantProvider: String, Codable, CaseIterable, Identifiable {
+    case openAI = "OpenAI"
+    case spaceXAI = "SpaceXAI"
+
+    var id: String { rawValue }
+
+    var model: String {
+        switch self {
+        case .openAI: return "gpt-5.6-sol"
+        case .spaceXAI: return "grok-4.6"
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .openAI: return "OpenAI"
+        case .spaceXAI: return "SpaceXAI"
+        }
+    }
+
+    var keyLabel: String {
+        switch self {
+        case .openAI: return "OpenAI API Key"
+        case .spaceXAI: return "xAI API Key"
+        }
+    }
+
+    var environmentVariable: String {
+        switch self {
+        case .openAI: return "OPENAI_API_KEY"
+        case .spaceXAI: return "XAI_API_KEY"
+        }
+    }
+}
+
 struct AppSettings: Codable, Equatable {
     var baseCurrency: CurrencyCode = .cny
     var provider: QuoteProvider = .automatic
@@ -190,6 +225,47 @@ struct AppSettings: Codable, Equatable {
     var futuPort: Int = 11111
     var allowPublicFallback: Bool = true
     var refreshIntervalSeconds: Int = 60
+    var assistantProvider: AssistantProvider = .openAI
+
+    init(
+        baseCurrency: CurrencyCode = .cny,
+        provider: QuoteProvider = .automatic,
+        futuHost: String = "127.0.0.1",
+        futuPort: Int = 11111,
+        allowPublicFallback: Bool = true,
+        refreshIntervalSeconds: Int = 60,
+        assistantProvider: AssistantProvider = .openAI
+    ) {
+        self.baseCurrency = baseCurrency
+        self.provider = provider
+        self.futuHost = futuHost
+        self.futuPort = futuPort
+        self.allowPublicFallback = allowPublicFallback
+        self.refreshIntervalSeconds = refreshIntervalSeconds
+        self.assistantProvider = assistantProvider
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case baseCurrency
+        case provider
+        case futuHost
+        case futuPort
+        case allowPublicFallback
+        case refreshIntervalSeconds
+        case assistantProvider
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        baseCurrency = try container.decodeIfPresent(CurrencyCode.self, forKey: .baseCurrency) ?? .cny
+        provider = try container.decodeIfPresent(QuoteProvider.self, forKey: .provider) ?? .automatic
+        futuHost = try container.decodeIfPresent(String.self, forKey: .futuHost) ?? "127.0.0.1"
+        futuPort = try container.decodeIfPresent(Int.self, forKey: .futuPort) ?? 11111
+        allowPublicFallback = try container.decodeIfPresent(Bool.self, forKey: .allowPublicFallback) ?? true
+        refreshIntervalSeconds = try container.decodeIfPresent(Int.self, forKey: .refreshIntervalSeconds) ?? 60
+        // Before provider selection existed, AUREL only supported SpaceXAI.
+        assistantProvider = try container.decodeIfPresent(AssistantProvider.self, forKey: .assistantProvider) ?? .spaceXAI
+    }
 }
 
 struct PortfolioData: Codable, Equatable {
