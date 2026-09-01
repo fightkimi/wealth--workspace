@@ -24,7 +24,7 @@ enum InvestmentSkillID: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .auto: return "自动"
+        case .auto: return "智能路由"
         case .portfolioReview: return "组合审视"
         case .portfolioRisk: return "组合风险"
         case .positionSizing: return "仓位规模"
@@ -47,7 +47,7 @@ enum InvestmentSkillID: String, CaseIterable, Identifiable {
 
     var promptHint: String {
         switch self {
-        case .auto: return "根据问题自动选择研究纪律"
+        case .auto: return "根据问题自动组合 1–3 个互补研究能力"
         case .portfolioReview: return "集中度、相关性、现金与机会成本"
         case .portfolioRisk: return "HHI、相关暴露、催化剂扎堆"
         case .positionSizing: return "按风险预算给保守仓位，不下单"
@@ -83,6 +83,7 @@ enum InvestmentSkillCatalog {
 
     数据纪律：
     - 本机快照里的持仓、现金、本地事件、行情护照是唯一事实源。
+    - 快照会明确写出已载入持仓数。只要持仓数大于 0，就不得回答「没有持仓」或「无法访问持仓」；必须逐项读取持仓表。
     - 价格、数量、汇率、事件时刻缺失时写「暂无数据」，禁止编造。
     - 提到价格必须带市场、币种、价格类型、交易时段、来源和延迟状态。
     - 公开源或未证明扩展时段时，不得把收盘价说成盘前、盘后或夜盘。
@@ -345,7 +346,7 @@ enum InvestmentSkillRouter {
         let rules: [(InvestmentSkillID, [String])] = [
             (.bearCase, ["空方", "看空", "做空", "红队", "反方", "bear case", "short thesis"]),
             (.earningsPreview, ["前瞻", "preview", "即将发布", "财报前", "财报季准备", "下季财报"]),
-            (.financialHealth, ["piotroski", "f-score", "roic", "dupont", "杜邦", "财务体检", "偿债", "altman", "应计"]),
+            (.financialHealth, ["piotroski", "f-score", "roic", "dupont", "杜邦", "财务体检", "财务质量", "基本面质量", "现金流", "偿债", "负债", "altman", "应计"]),
             (.valuation, ["估值", "dcf", "内在价值", "隐含增长", "预期差", "安全边际价格", "pe ", "peg"]),
             (.peterLynch, ["林奇", "lynch", "十倍股", "peg", "故事股"]),
             (.bottleneck, ["瓶颈", "供应链", "卡脖子", "上游", "serenity"]),
@@ -367,6 +368,6 @@ enum InvestmentSkillRouter {
         if hits.isEmpty {
             hits = [hasHoldings ? .portfolioReview : .investmentChecklist]
         }
-        return Array(InvestmentSkillCatalog.uniqueSkills(hits).prefix(2))
+        return Array(InvestmentSkillCatalog.uniqueSkills(hits).prefix(3))
     }
 }

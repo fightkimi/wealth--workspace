@@ -23,10 +23,12 @@ struct WealthWorkbenchChecks {
         try checkInvestmentSkillCatalog()
         try checkInvestmentSkillRouter()
         try checkDeskSnapshotOmitsMissingQuotes()
+        try checkAssistantContextReceiptAndPromptComposition()
         try checkSpaceXAIRequestAndStreamParser()
         try checkSpaceXAIKeyFileRoundTrip()
         try checkAssistantProviderCompatibility()
         try checkOpenAIRequestAndStreamParser()
+        try await checkOpenAIStreamCompletionFallback()
         try checkOpenAICredentialFileRoundTrip()
         try await checkCredentialsRestoreAfterRelaunch()
         try checkAssistantPlacementPersistence()
@@ -330,6 +332,10 @@ struct WealthWorkbenchChecks {
             InvestmentSkillRouter.resolve(query: "Piotroski 和 ROIC 怎么样", selected: .auto, hasHoldings: true) == [.financialHealth],
             "财务质量问题应路由到财务体检"
         )
+        try expect(
+            InvestmentSkillRouter.resolve(query: "最大持仓的财务质量和估值站得住吗", selected: .auto, hasHoldings: true) == [.financialHealth, .valuation, .positionReview],
+            "智能路由应能为复合问题组合最多三个互补技能"
+        )
         pass("投资助手技能路由")
     }
 
@@ -386,6 +392,56 @@ struct WealthWorkbenchChecks {
         try expect(snapshot.contains("时间待定"), "仅有日期的财报不得伪装精确时间")
         try expect(!snapshot.contains("Bearer") && !DeskSnapshotBuilder.containsCredentialLeak(snapshot), "快照不得泄漏 API Key")
         pass("投资助手持仓快照纪律")
+    }
+
+    private static func checkAssistantContextReceiptAndPromptComposition() throws {
+        let holding = Holding(market: .us, name: "Test Co", code: "TEST", sector: "科技", quantity: 10, averageCost: 8, investedCost: nil, currency: .usd)
+        let quote = QuoteSnapshot(
+            key: holding.quoteKey,
+            code: holding.normalizedCode,
+            name: holding.name,
+            price: 12,
+            previousClose: 11,
+            change: 1,
+            percentChange: 9.09,
+            passport: PricePassport(
+                market: .us,
+                currency: .usd,
+                priceType: .regular,
+                session: .regular,
+                comparisonBasis: "上一常规交易日收盘价",
+                quoteTime: Date(timeIntervalSince1970: 1_788_165_400),
+                fetchedAt: Date(timeIntervalSince1970: 1_788_165_405),
+                source: "Futu OpenD",
+                delayStatus: .realtime,
+                marketTimeZoneIdentifier: "America/New_York"
+            )
+        )
+        let metrics = HoldingMetrics(
+            holding: holding,
+            quote: quote,
+            marketValue: 120,
+            dailyProfit: 10,
+            totalProfit: 40,
+            totalReturn: 50,
+            weight: 100
+        )
+        let receipt = DeskContextReceipt.make(
+            holdings: [metrics],
+            providerStatus: "Futu OpenD",
+            generatedAt: Date(timeIntervalSince1970: 1_788_165_410),
+            lastRefreshAt: Date(timeIntervalSince1970: 1_788_165_405)
+        )
+        try expect(receipt.holdingCount == 1 && receipt.quotedHoldingCount == 1, "上下文回执应精确声明已载入的持仓与行情数量")
+        let payload = DeskPromptComposer.makePayload(
+            skillIDs: [.portfolioReview, .portfolioRisk],
+            snapshot: "## 持仓\n美股 | Test Co | TEST | 10",
+            history: [AssistantMessage(role: "user", content: "审视当前组合")]
+        )
+        try expect(payload.first?.role == "system" && payload.first?.content.contains("组合审视") == true, "技能纪律应保留在系统指令中")
+        try expect(payload.dropFirst().first?.role == "user" && payload.dropFirst().first?.content.contains("aurel_portfolio_context") == true, "本机持仓必须作为独立只读数据上下文发送")
+        try expect(payload.last?.content == "审视当前组合", "真实用户问题必须排在持仓上下文之后")
+        pass("助手持仓上下文回执与提示分层")
     }
 
     private static func checkSpaceXAIRequestAndStreamParser() throws {
@@ -447,8 +503,25 @@ struct WealthWorkbenchChecks {
         try expect(body?["store"] as? Bool == false, "投资助手响应不应由 API 持久化")
         try expect((body?["reasoning"] as? [String: Any])?["effort"] as? String == "medium", "OpenAI 应使用 medium 推理强度")
         try expect((body?["text"] as? [String: Any])?["verbosity"] as? String == "medium", "OpenAI 应使用 medium 输出详略")
+        try expect(body?["instructions"] as? String == nil, "没有系统消息时不应虚构 instructions")
         try expect(try OpenAISSEParser.contentDelta(from: #"data: {"type":"response.output_text.delta","delta":"你好"}"#) == "你好", "Responses SSE 增量应解析文本")
-        try expect(try OpenAISSEParser.contentDelta(from: #"data: {"type":"response.completed","response":{}}"#) == nil, "Responses 完成事件不应重复输出文本")
+        try expect(try OpenAISSEParser.textEvent(from: #"data: {"type":"response.output_text.done","text":"完整回答"}"#) == .final("完整回答"), "代理只返回 done 事件时也必须恢复完整回复")
+        try expect(try OpenAISSEParser.textEvent(from: #"data: {"type":"response.output_item.done","item":{"type":"message","content":[{"type":"output_text","text":"持仓结论"}]}}"#) == .final("持仓结论"), "代理只返回完成消息时也必须恢复回复")
+        try expect(try OpenAISSEParser.textEvent(from: #"data: {"choices":[{"delta":{"content":"兼容网关"}}]}"#) == .delta("兼容网关"), "自定义访问地址返回 Chat Completions SSE 时应兼容")
+
+        let systemRequest = try OpenAIRequestBuilder.makeURLRequest(
+            apiKey: "test-openai-key-not-a-real-secret",
+            endpoint: "https://gateway.example.com/v1/responses",
+            messages: [
+                AssistantMessage(role: "system", content: "只读投资助手"),
+                AssistantMessage(role: "user", content: "审视组合")
+            ],
+            stream: true
+        )
+        let systemBody = try JSONSerialization.jsonObject(with: systemRequest.httpBody ?? Data()) as? [String: Any]
+        try expect(systemBody?["instructions"] as? String == "只读投资助手", "Responses API 应使用独立 instructions 承载系统指令")
+        let input = systemBody?["input"] as? [[String: Any]]
+        try expect(input?.count == 1 && input?.first?["role"] as? String == "user", "系统指令不得重复混入用户输入")
         do {
             _ = try OpenAIRequestBuilder.makeURLRequest(apiKey: "   ", messages: [])
             throw CheckError.failed("OpenAI 空 API Key 必须拒绝发请求")
@@ -466,6 +539,40 @@ struct WealthWorkbenchChecks {
             // expected
         }
         pass("OpenAI Responses 请求与流式解析")
+    }
+
+    private static func checkOpenAIStreamCompletionFallback() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let body = """
+        data: {"type":"response.output_text.delta","delta":"持仓"}
+
+        data: {"type":"response.output_text.done","text":"持仓结论"}
+
+        data: {"type":"response.completed","response":{"output":[{"type":"message","content":[{"type":"output_text","text":"持仓结论"}]}]}}
+
+        """
+        MockURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "text/event-stream"]
+            )!
+            return (response, Data(body.utf8))
+        }
+        let client = OpenAIClient(session: session, model: "gpt-5.6-sol")
+        var output = ""
+        for try await delta in client.stream(
+            apiKey: "test-openai-key-not-a-real-secret",
+            endpoint: "https://gateway.example.com/v1/responses",
+            messages: [AssistantMessage(role: "user", content: "hello")]
+        ) {
+            output += delta
+        }
+        try expect(output == "持仓结论", "完成事件兜底不得漏字或重复流式内容")
+        pass("OpenAI 完成事件流兜底")
     }
 
     private static func checkOpenAICredentialFileRoundTrip() throws {

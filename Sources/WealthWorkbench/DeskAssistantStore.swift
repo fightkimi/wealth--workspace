@@ -24,6 +24,7 @@ final class DeskAssistantStore: ObservableObject {
     @Published var isStreaming = false
     @Published var errorMessage: String?
     @Published private(set) var panelOffset: CGSize = .zero
+    @Published private(set) var lastContextReceipt: DeskContextReceipt?
 
     var spaceXAIClient = SpaceXAIClient()
     var openAIClient = OpenAIClient()
@@ -70,6 +71,7 @@ final class DeskAssistantStore: ObservableObject {
         messages = []
         errorMessage = nil
         draft = ""
+        lastContextReceipt = nil
     }
 
     func send(store: AppStore, news: NewsStore) {
@@ -96,17 +98,29 @@ final class DeskAssistantStore: ObservableObject {
         messages.append(DeskChatMessage(id: assistantID, role: .assistant, text: "", skillIDs: skillIDs, isStreaming: true))
         isStreaming = true
 
-        let snapshot = Self.snapshot(store: store, news: news)
-        let system = InvestmentSkillCatalog.compile(skillIDs: skillIDs)
-            + "\n\n## 当前本机快照\n"
-            + snapshot
-        let history = messages.dropLast().suffix(12).map { item in
-            AssistantMessage(role: item.role == .user ? "user" : "assistant", content: item.text)
-        }
-        let payload = [AssistantMessage(role: "system", content: system)] + history
-
         streamTask = Task { [spaceXAIClient, openAIClient] in
             do {
+                await store.prepareAssistantContext()
+                try Task.checkCancellation()
+
+                let holdings = store.holdingMetrics()
+                let generatedAt = store.timeHealth.correctedNow
+                lastContextReceipt = DeskContextReceipt.make(
+                    holdings: holdings,
+                    providerStatus: store.providerStatus,
+                    generatedAt: generatedAt,
+                    lastRefreshAt: store.lastRefreshAt
+                )
+                let snapshot = Self.snapshot(store: store, news: news)
+                let history = messages.dropLast().suffix(12).map { item in
+                    AssistantMessage(role: item.role == .user ? "user" : "assistant", content: item.text)
+                }
+                let payload = DeskPromptComposer.makePayload(
+                    skillIDs: skillIDs,
+                    snapshot: snapshot,
+                    history: Array(history)
+                )
+
                 var assembled = ""
                 let stream: AsyncThrowingStream<String, Error>
                 switch provider {
@@ -170,7 +184,7 @@ final class DeskAssistantStore: ObservableObject {
             if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 messages[index].text = text
             } else if messages[index].text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                messages[index].text = error == nil ? "已停止生成。" : "暂无数据"
+                messages[index].text = error == nil ? "已停止生成。" : "未能完成分析"
             }
         }
         isStreaming = false

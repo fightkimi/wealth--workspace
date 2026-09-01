@@ -166,6 +166,7 @@ private struct DeskAssistantPanel: View {
         VStack(spacing: 0) {
             header
             skillStrip
+            contextStatusBar
             Divider().overlay(WorkbenchTheme.border)
             conversation
             Divider().overlay(WorkbenchTheme.border)
@@ -269,29 +270,113 @@ private struct DeskAssistantPanel: View {
     }
 
     private var skillStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(InvestmentSkillID.allCases) { skill in
-                    let selected = desk.selectedSkill == skill
-                    Button { desk.selectedSkill = skill } label: {
-                        Text(skill.title)
-                            .font(.custom("PingFangSC-Medium", size: 10))
-                            .foregroundStyle(selected ? WorkbenchTheme.canvas : WorkbenchTheme.secondary)
-                            .padding(.horizontal, 10)
-                            .frame(height: 28)
-                            .background(selected ? WorkbenchTheme.text : WorkbenchTheme.raised.opacity(0.72))
-                            .overlay(Capsule().stroke(selected ? WorkbenchTheme.text.opacity(0.7) : WorkbenchTheme.border, lineWidth: 1))
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .help(skill.promptHint)
-                    .accessibilityLabel(skill.title)
-                    .accessibilityAddTraits(selected ? .isSelected : [])
-                }
+        HStack(spacing: 7) {
+            Button {
+                desk.selectedSkill = .auto
+            } label: {
+                Label("智能路由", systemImage: "wand.and.stars")
+                    .font(.custom("PingFangSC-Medium", size: 10))
+                    .foregroundStyle(desk.selectedSkill == .auto ? WorkbenchTheme.canvas : WorkbenchTheme.secondary)
+                    .padding(.horizontal, 10)
+                    .frame(height: 28)
+                    .background(desk.selectedSkill == .auto ? WorkbenchTheme.text : WorkbenchTheme.raised.opacity(0.72))
+                    .overlay(Capsule().stroke(desk.selectedSkill == .auto ? WorkbenchTheme.text.opacity(0.7) : WorkbenchTheme.border, lineWidth: 1))
+                    .clipShape(Capsule())
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
+            .buttonStyle(.plain)
+            .help("自动组合 1–3 个互补研究能力")
+
+            Menu {
+                ForEach(InvestmentSkillCatalog.selectable) { skill in
+                    Button {
+                        desk.selectedSkill = skill
+                    } label: {
+                        if desk.selectedSkill == skill {
+                            Label(skill.title, systemImage: "checkmark")
+                        } else {
+                            Text(skill.title)
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "scope")
+                    Text(desk.selectedSkill == .auto ? "指定技能" : desk.selectedSkill.title)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 7, weight: .bold))
+                }
+                .font(.custom("PingFangSC-Medium", size: 10))
+                .foregroundStyle(desk.selectedSkill == .auto ? WorkbenchTheme.secondary : WorkbenchTheme.accent)
+                .padding(.horizontal, 10)
+                .frame(height: 28)
+                .background(WorkbenchTheme.raised.opacity(0.72))
+                .overlay(Capsule().stroke(desk.selectedSkill == .auto ? WorkbenchTheme.border : WorkbenchTheme.accent.opacity(0.34), lineWidth: 1))
+                .clipShape(Capsule())
+            }
+            .menuStyle(.borderlessButton)
+            .help(desk.selectedSkill == .auto ? "手动锁定一个研究技能" : desk.selectedSkill.promptHint)
+
+            Spacer(minLength: 4)
+            Text(desk.selectedSkill == .auto ? "自动组合最多 3 项" : "手动锁定")
+                .font(.custom("PingFangSC-Regular", size: 9))
+                .foregroundStyle(WorkbenchTheme.muted)
+                .lineLimit(1)
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+    }
+
+    private var contextStatusBar: some View {
+        let receipt = desk.lastContextReceipt ?? DeskContextReceipt.make(
+            holdings: store.holdingMetrics(),
+            providerStatus: store.providerStatus,
+            generatedAt: store.timeHealth.correctedNow,
+            lastRefreshAt: store.lastRefreshAt
+        )
+        let tint = receipt.holdingCount == 0
+            ? WorkbenchTheme.warning
+            : (receipt.hasCompleteQuotes ? WorkbenchTheme.negative : WorkbenchTheme.warning)
+        return HStack(spacing: 6) {
+            Circle()
+                .fill(tint)
+                .frame(width: 5, height: 5)
+            Text(desk.lastContextReceipt == nil ? "持仓上下文可用" : "本轮已发送")
+                .font(.custom("PingFangSC-Medium", size: 9))
+                .foregroundStyle(tint)
+            Text("\(receipt.holdingCount) 项持仓 · \(receipt.quotedHoldingCount) 项行情")
+                .font(.custom("PingFangSC-Regular", size: 9))
+                .foregroundStyle(WorkbenchTheme.secondary)
+                .monospacedDigit()
+            if receipt.estimatedHoldingCount > 0 {
+                Text("· \(receipt.estimatedHoldingCount) 项估算")
+                    .font(.custom("PingFangSC-Regular", size: 9))
+                    .foregroundStyle(WorkbenchTheme.warning)
+            }
+            Spacer(minLength: 6)
+            Text(receipt.providerStatus)
+                .font(.custom("PingFangSC-Regular", size: 8))
+                .foregroundStyle(WorkbenchTheme.muted)
+                .lineLimit(1)
+            if let refreshedAt = receipt.lastRefreshAt {
+                Text(contextTime(refreshedAt))
+                    .font(.system(size: 8, weight: .regular, design: .monospaced))
+                    .foregroundStyle(WorkbenchTheme.muted)
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 28)
+        .background(WorkbenchTheme.canvas.opacity(0.46))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("持仓上下文")
+        .accessibilityValue("\(receipt.holdingCount) 项持仓，\(receipt.quotedHoldingCount) 项行情")
+    }
+
+    private func contextTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter.string(from: date)
     }
 
     @ViewBuilder

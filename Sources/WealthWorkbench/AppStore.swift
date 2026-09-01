@@ -283,6 +283,21 @@ final class AppStore: ObservableObject {
         }
     }
 
+    func prepareAssistantContext() async {
+        guard !data.holdings.isEmpty else { return }
+        if isRefreshing {
+            for _ in 0..<80 where isRefreshing && !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            return
+        }
+        let freshnessWindow = TimeInterval(max(15, min(data.settings.refreshIntervalSeconds, 60)))
+        let needsRefresh = lastRefreshAt.map { Date().timeIntervalSince($0) > freshnessWindow } ?? true
+        if needsRefresh {
+            await refreshQuotes()
+        }
+    }
+
     func refreshQuotes() async {
         guard !isRefreshing else { return }
         isRefreshing = true
