@@ -16,6 +16,7 @@ final class AppStore: ObservableObject {
     @Published var twelveDataKeyPresent = false
     @Published var spaceXAIKeyPresent = false
     @Published var openAIKeyPresent = false
+    @Published private(set) var openAIEndpoint = OpenAICredential.defaultEndpoint
     @Published var marketCalendarEvents: [MarketCalendarEvent] = []
     @Published var marketCalendarFailures: [String] = []
     @Published var isRefreshingCalendar = false
@@ -24,7 +25,7 @@ final class AppStore: ObservableObject {
     private let persistence: PortfolioPersisting
     private let apiKeyStore: APIKeyPersisting
     private let spaceXAIKeyStore: APIKeyPersisting
-    private let openAIKeyStore: APIKeyPersisting
+    private let openAICredentialStore: OpenAICredentialPersisting
     private var twelveDataAPIKey: String?
     private var spaceXAIAPIKey: String?
     private var openAIAPIKey: String?
@@ -37,7 +38,7 @@ final class AppStore: ObservableObject {
         persistence: PortfolioPersisting = PortfolioFileStore(),
         apiKeyStore: APIKeyPersisting = APIKeyFileStore(),
         spaceXAIKeyStore: APIKeyPersisting = APIKeyFileStore(filename: "xai-api-key.txt"),
-        openAIKeyStore: APIKeyPersisting = APIKeyFileStore(filename: "openai-api-key.txt"),
+        openAICredentialStore: OpenAICredentialPersisting = OpenAICredentialFileStore(),
         tencent: TencentQuoteService = TencentQuoteService(),
         twelve: TwelveDataQuoteService = TwelveDataQuoteService(),
         futu: FutuQuoteService = FutuQuoteService(),
@@ -46,7 +47,7 @@ final class AppStore: ObservableObject {
         self.persistence = persistence
         self.apiKeyStore = apiKeyStore
         self.spaceXAIKeyStore = spaceXAIKeyStore
-        self.openAIKeyStore = openAIKeyStore
+        self.openAICredentialStore = openAICredentialStore
         self.tencent = tencent
         self.twelve = twelve
         self.futu = futu
@@ -57,34 +58,13 @@ final class AppStore: ObservableObject {
             self.data = PortfolioData()
             self.notice = "本地资产数据读取失败：\(error.localizedDescription)"
         }
-        do {
-            self.twelveDataAPIKey = try apiKeyStore.load()
-            self.twelveDataKeyPresent = self.twelveDataAPIKey?.isEmpty == false
-        } catch {
-            self.notice = "本地 API Key 文件读取失败：\(error.localizedDescription)"
-        }
-        do {
-            self.spaceXAIAPIKey = try spaceXAIKeyStore.load()
-            self.spaceXAIKeyPresent = self.spaceXAIAPIKey?.isEmpty == false
-        } catch {
-            if notice == nil {
-                notice = "SpaceXAI API Key 文件读取失败：\(error.localizedDescription)"
-            }
-        }
-        do {
-            self.openAIAPIKey = try openAIKeyStore.load()
-            self.openAIKeyPresent = self.openAIAPIKey?.isEmpty == false
-        } catch {
-            if notice == nil {
-                notice = "OpenAI API Key 文件读取失败：\(error.localizedDescription)"
-            }
-        }
+        reloadLocalCredentials()
     }
 
     var dataFilePath: String { persistence.displayPath }
     var apiKeyFilePath: String { apiKeyStore.displayPath }
     var spaceXAIKeyFilePath: String { spaceXAIKeyStore.displayPath }
-    var openAIKeyFilePath: String { openAIKeyStore.displayPath }
+    var openAICredentialFilePath: String { openAICredentialStore.displayPath }
     var futuBridgeInstalled: Bool { futu.isBridgeInstalled }
     var spaceXAIKeyAvailable: Bool { resolvedSpaceXAIKey() != nil }
     var openAIKeyAvailable: Bool { resolvedOpenAIKey() != nil }
@@ -99,17 +79,40 @@ final class AppStore: ObservableObject {
     }
 
     func resolvedSpaceXAIKey() -> String? {
-        if let spaceXAIAPIKey, !spaceXAIAPIKey.isEmpty { return spaceXAIAPIKey }
-        let environment = ProcessInfo.processInfo.environment["XAI_API_KEY"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return environment?.isEmpty == false ? environment : nil
+        guard let spaceXAIAPIKey, !spaceXAIAPIKey.isEmpty else { return nil }
+        return spaceXAIAPIKey
     }
 
     func resolvedOpenAIKey() -> String? {
-        if let openAIAPIKey, !openAIAPIKey.isEmpty { return openAIAPIKey }
-        let environment = ProcessInfo.processInfo.environment["OPENAI_API_KEY"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return environment?.isEmpty == false ? environment : nil
+        guard let openAIAPIKey, !openAIAPIKey.isEmpty else { return nil }
+        return openAIAPIKey
+    }
+
+    func reloadLocalCredentials() {
+        do {
+            twelveDataAPIKey = try apiKeyStore.load()
+            twelveDataKeyPresent = twelveDataAPIKey?.isEmpty == false
+        } catch {
+            notice = "Twelve Data 本地凭证读取失败：\(error.localizedDescription)"
+        }
+        do {
+            spaceXAIAPIKey = try spaceXAIKeyStore.load()
+            spaceXAIKeyPresent = spaceXAIAPIKey?.isEmpty == false
+        } catch {
+            if notice == nil {
+                notice = "SpaceXAI 本地凭证读取失败：\(error.localizedDescription)"
+            }
+        }
+        do {
+            let credential = try openAICredentialStore.load()
+            openAIAPIKey = credential?.apiKey
+            openAIEndpoint = credential?.endpoint ?? OpenAICredential.defaultEndpoint
+            openAIKeyPresent = openAIAPIKey?.isEmpty == false
+        } catch {
+            if notice == nil {
+                notice = "OpenAI 本地配置读取失败：\(error.localizedDescription)"
+            }
+        }
     }
 
     func persist() {
@@ -207,22 +210,38 @@ final class AppStore: ObservableObject {
         persist()
     }
 
-    func saveOpenAIKey(_ value: String) {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    @discardableResult
+    func saveOpenAIConfiguration(apiKey value: String, endpoint valueEndpoint: String) -> Bool {
+        let trimmedKey = value.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
-            if trimmed.isEmpty {
-                try openAIKeyStore.delete()
-                openAIAPIKey = nil
-                openAIKeyPresent = false
-                notice = "OpenAI API Key 已从本地文件移除"
-            } else {
-                try openAIKeyStore.save(trimmed)
-                openAIAPIKey = trimmed
-                openAIKeyPresent = true
-                notice = "OpenAI API Key 已保存到应用专属本地文件"
+            let endpoint = try OpenAIRequestBuilder.validatedEndpoint(valueEndpoint).absoluteString
+            let key = trimmedKey.isEmpty ? openAIAPIKey : trimmedKey
+            guard let key, !key.isEmpty else {
+                notice = "请填写 OpenAI API Key 后保存本机配置"
+                return false
             }
+            let credential = OpenAICredential(apiKey: key, endpoint: endpoint)
+            try openAICredentialStore.save(credential)
+            openAIAPIKey = credential.apiKey
+            openAIEndpoint = credential.endpoint
+            openAIKeyPresent = true
+            notice = "OpenAI 访问地址与 API Key 已保存在本机，重启后自动恢复"
+            return true
         } catch {
-            notice = "OpenAI API Key 本地保存失败：\(error.localizedDescription)"
+            notice = "OpenAI 本地配置保存失败：\(error.localizedDescription)"
+            return false
+        }
+    }
+
+    func deleteOpenAIConfiguration() {
+        do {
+            try openAICredentialStore.delete()
+            openAIAPIKey = nil
+            openAIEndpoint = OpenAICredential.defaultEndpoint
+            openAIKeyPresent = false
+            notice = "OpenAI 本地配置已移除"
+        } catch {
+            notice = "OpenAI 本地配置移除失败：\(error.localizedDescription)"
         }
     }
 
@@ -238,7 +257,7 @@ final class AppStore: ObservableObject {
                 try spaceXAIKeyStore.save(trimmed)
                 spaceXAIAPIKey = trimmed
                 spaceXAIKeyPresent = true
-                notice = "SpaceXAI API Key 已保存到应用专属本地文件"
+                notice = "SpaceXAI API Key 已保存在本机，重启后自动恢复"
             }
         } catch {
             notice = "SpaceXAI API Key 本地保存失败：\(error.localizedDescription)"
@@ -257,7 +276,7 @@ final class AppStore: ObservableObject {
                 try apiKeyStore.save(trimmed)
                 twelveDataAPIKey = trimmed
                 twelveDataKeyPresent = true
-                notice = "Twelve Data API Key 已保存到应用专属本地文件"
+                notice = "Twelve Data API Key 已保存在本机，重启后自动恢复"
             }
         } catch {
             notice = "API Key 本地保存失败：\(error.localizedDescription)"

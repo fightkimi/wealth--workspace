@@ -2,6 +2,7 @@ import Foundation
 
 enum OpenAIClientError: LocalizedError, Equatable {
     case missingAPIKey
+    case invalidEndpoint
     case invalidResponse
     case http(Int, String)
     case emptyOutput
@@ -9,7 +10,9 @@ enum OpenAIClientError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .missingAPIKey:
-            return "未配置 OpenAI API Key。请到通用设置保存到本地文件，或设置环境变量 OPENAI_API_KEY。"
+            return "未配置 OpenAI API Key。请到通用设置保存本机配置。"
+        case .invalidEndpoint:
+            return "OpenAI 访问地址无效。请填写完整 HTTPS Responses 地址；本机网关可使用 localhost 或 127.0.0.1 的 HTTP 地址。"
         case .invalidResponse:
             return "OpenAI 返回了无法识别的内容"
         case .http(let code, let body):
@@ -22,11 +25,30 @@ enum OpenAIClientError: LocalizedError, Equatable {
 }
 
 enum OpenAIRequestBuilder {
-    static let endpoint = URL(string: "https://api.openai.com/v1/responses")!
     static let defaultModel = "gpt-5.6-sol"
+
+    static func validatedEndpoint(_ value: String) throws -> URL {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let components = URLComponents(string: trimmed),
+              let scheme = components.scheme?.lowercased(),
+              let host = components.host?.lowercased(),
+              !host.isEmpty,
+              components.user == nil,
+              components.password == nil,
+              components.fragment == nil,
+              let url = components.url else {
+            throw OpenAIClientError.invalidEndpoint
+        }
+        let localHosts = ["localhost", "127.0.0.1", "::1"]
+        guard scheme == "https" || (scheme == "http" && localHosts.contains(host)) else {
+            throw OpenAIClientError.invalidEndpoint
+        }
+        return url
+    }
 
     static func makeURLRequest(
         apiKey: String,
+        endpoint: String = OpenAICredential.defaultEndpoint,
         messages: [AssistantMessage],
         model: String = defaultModel,
         stream: Bool = true
@@ -34,7 +56,7 @@ enum OpenAIRequestBuilder {
         let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw OpenAIClientError.missingAPIKey }
 
-        var request = URLRequest(url: endpoint)
+        var request = URLRequest(url: try validatedEndpoint(endpoint))
         request.httpMethod = "POST"
         request.timeoutInterval = 300
         request.setValue("Bearer \(trimmed)", forHTTPHeaderField: "Authorization")
@@ -94,12 +116,13 @@ struct OpenAIClient {
     var session: URLSession = .shared
     var model: String = OpenAIRequestBuilder.defaultModel
 
-    func stream(apiKey: String, messages: [AssistantMessage]) -> AsyncThrowingStream<String, Error> {
+    func stream(apiKey: String, endpoint: String, messages: [AssistantMessage]) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
                     let request = try OpenAIRequestBuilder.makeURLRequest(
                         apiKey: apiKey,
+                        endpoint: endpoint,
                         messages: messages,
                         model: model,
                         stream: true

@@ -8,3 +8,6 @@ dist/
 .venv/
 Resources/futu-runtime/
 Resources/Tools/
+Credentials/
+*-api-key.txt
+openai-credentials.json

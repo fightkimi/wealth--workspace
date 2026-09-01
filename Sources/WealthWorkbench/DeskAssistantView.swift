@@ -7,71 +7,125 @@ struct DeskAssistantOverlay: View {
     let onOpenSettings: () -> Void
 
     var body: some View {
-        Group {
-            if desk.isExpanded {
-                DeskAssistantPanel(news: news, desk: desk, onOpenSettings: onOpenSettings)
-                    .frame(width: 460, height: 620)
-                    .offset(clampedOffset)
-            } else {
-                DeskAssistantFab { desk.isExpanded = true }
+        GeometryReader { proxy in
+            ZStack(alignment: .bottomTrailing) {
+                Color.clear.allowsHitTesting(false)
+                Group {
+                    if desk.isExpanded {
+                        DeskAssistantPanel(
+                            news: news,
+                            desk: desk,
+                            clampOffset: { clamp($0, in: proxy.size, element: CGSize(width: 460, height: 620)) },
+                            onOpenSettings: onOpenSettings
+                        )
+                        .frame(width: 460, height: 620)
+                    } else {
+                        DeskAssistantFab(
+                            desk: desk,
+                            clampOffset: { clamp($0, in: proxy.size, element: CGSize(width: 154, height: 46)) },
+                            action: { desk.isExpanded = true }
+                        )
+                    }
+                }
+                .offset(
+                    clamp(
+                        desk.panelOffset,
+                        in: proxy.size,
+                        element: desk.isExpanded ? CGSize(width: 460, height: 620) : CGSize(width: 154, height: 46)
+                    )
+                )
             }
+            .padding(.trailing, 18)
+            .padding(.bottom, 18)
         }
-        .padding(.trailing, 18)
-        .padding(.bottom, 18)
     }
 
-    private var clampedOffset: CGSize {
-        CGSize(
-            width: min(0, max(-760, desk.panelOffset.width)),
-            height: min(0, max(-480, desk.panelOffset.height))
+    private func clamp(_ proposed: CGSize, in container: CGSize, element: CGSize) -> CGSize {
+        let horizontalTravel = max(0, container.width - element.width - 36)
+        let verticalTravel = max(0, container.height - element.height - 36)
+        return CGSize(
+            width: min(0, max(-horizontalTravel, proposed.width)),
+            height: min(0, max(-verticalTravel, proposed.height))
         )
     }
 }
 
 private struct DeskAssistantFab: View {
     @EnvironmentObject private var store: AppStore
+    @ObservedObject var desk: DeskAssistantStore
+    let clampOffset: (CGSize) -> CGSize
     let action: () -> Void
     @State private var hovered = false
+    @State private var dragStart: CGSize = .zero
+    @State private var didDrag = false
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 9) {
-                AurelMark()
-                    .frame(width: 27, height: 27)
-                    .shadow(color: WorkbenchTheme.accent.opacity(0.18), radius: 6)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("AUREL Desk")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .tracking(0.35)
-                    Text(store.assistantKeyAvailable ? store.assistantProvider.model : "等待配置")
-                        .font(.custom("PingFangSC-Regular", size: 8))
-                        .foregroundStyle(store.assistantKeyAvailable ? WorkbenchTheme.muted : WorkbenchTheme.warning)
-                }
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(WorkbenchTheme.accent)
+        HStack(spacing: 9) {
+            AurelMark()
+                .frame(width: 27, height: 27)
+                .shadow(color: WorkbenchTheme.accent.opacity(0.18), radius: 6)
+            VStack(alignment: .leading, spacing: 0) {
+                Text("AUREL Desk")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .tracking(0.35)
+                Text(store.assistantKeyAvailable ? store.assistantProvider.model : "等待配置")
+                    .font(.custom("PingFangSC-Regular", size: 8))
+                    .foregroundStyle(store.assistantKeyAvailable ? WorkbenchTheme.muted : WorkbenchTheme.warning)
             }
-            .foregroundStyle(WorkbenchTheme.text)
-            .padding(.leading, 7)
-            .padding(.trailing, 12)
-            .frame(height: 46)
-            .background(
-                LinearGradient(
-                    colors: [WorkbenchTheme.raised, WorkbenchTheme.panel],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .overlay(Capsule().stroke(hovered ? WorkbenchTheme.accent.opacity(0.62) : WorkbenchTheme.strongBorder, lineWidth: 1))
-            .clipShape(Capsule())
-            .shadow(color: Color.black.opacity(hovered ? 0.45 : 0.30), radius: hovered ? 17 : 11, y: 7)
-            .offset(y: hovered ? -2 : 0)
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(WorkbenchTheme.accent)
         }
-        .buttonStyle(.plain)
+        .foregroundStyle(WorkbenchTheme.text)
+        .padding(.leading, 7)
+        .padding(.trailing, 12)
+        .frame(height: 46)
+        .background(
+            LinearGradient(
+                colors: [WorkbenchTheme.raised, WorkbenchTheme.panel],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .overlay(Capsule().stroke(hovered ? WorkbenchTheme.accent.opacity(0.62) : WorkbenchTheme.strongBorder, lineWidth: 1))
+        .clipShape(Capsule())
+        .shadow(color: Color.black.opacity(hovered ? 0.45 : 0.30), radius: hovered ? 17 : 11, y: 7)
+        .offset(y: hovered ? -2 : 0)
+        .contentShape(Capsule())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    let distance = hypot(value.translation.width, value.translation.height)
+                    guard distance >= 4 else { return }
+                    if !didDrag {
+                        dragStart = desk.panelOffset
+                        didDrag = true
+                    }
+                    desk.move(
+                        to: clampOffset(
+                            CGSize(
+                                width: dragStart.width + value.translation.width,
+                                height: dragStart.height + value.translation.height
+                            )
+                        )
+                    )
+                }
+                .onEnded { _ in
+                    if didDrag {
+                        desk.persistPlacement()
+                    } else {
+                        action()
+                    }
+                    didDrag = false
+                }
+        )
         .animation(.easeOut(duration: 0.14), value: hovered)
         .onHover { hovered = $0 }
-        .help("投资助手 ⌘L")
+        .help("点击打开 · 拖动移动 · ⌘L")
         .accessibilityLabel("打开 AUREL 投资助手")
+        .accessibilityHint("可以拖动到窗口内的其他位置")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { action() }
         .allowsHitTesting(true)
     }
 }
@@ -80,6 +134,7 @@ private struct DeskAssistantPanel: View {
     @EnvironmentObject private var store: AppStore
     @ObservedObject var news: NewsStore
     @ObservedObject var desk: DeskAssistantStore
+    let clampOffset: (CGSize) -> CGSize
     let onOpenSettings: () -> Void
     @State private var dragStart: CGSize = .zero
 
@@ -170,12 +225,19 @@ private struct DeskAssistantPanel: View {
         .gesture(
             DragGesture()
                 .onChanged { value in
-                    desk.panelOffset = CGSize(
-                        width: dragStart.width + value.translation.width,
-                        height: dragStart.height + value.translation.height
+                    desk.move(
+                        to: clampOffset(
+                            CGSize(
+                                width: dragStart.width + value.translation.width,
+                                height: dragStart.height + value.translation.height
+                            )
+                        )
                     )
                 }
-                .onEnded { _ in dragStart = desk.panelOffset }
+                .onEnded { _ in
+                    dragStart = desk.panelOffset
+                    desk.persistPlacement()
+                }
         )
         .onAppear { dragStart = desk.panelOffset }
     }

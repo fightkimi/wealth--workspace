@@ -23,16 +23,34 @@ final class DeskAssistantStore: ObservableObject {
     @Published var draft = ""
     @Published var isStreaming = false
     @Published var errorMessage: String?
-    @Published var panelOffset: CGSize = .zero
+    @Published private(set) var panelOffset: CGSize = .zero
 
     var spaceXAIClient = SpaceXAIClient()
     var openAIClient = OpenAIClient()
     private var streamTask: Task<Void, Never>?
+    private let placementStore: AssistantPlacementPersisting
+
+    init(placementStore: AssistantPlacementPersisting = AssistantPlacementFileStore()) {
+        self.placementStore = placementStore
+        if let saved = try? placementStore.load() {
+            panelOffset = CGSize(width: saved.x, height: saved.y)
+        }
+    }
 
     var hasConversation: Bool { !messages.isEmpty }
 
     func toggle() {
         isExpanded.toggle()
+    }
+
+    func move(to offset: CGSize) {
+        panelOffset = offset
+    }
+
+    func persistPlacement() {
+        try? placementStore.save(
+            AssistantPlacement(x: panelOffset.width, y: panelOffset.height)
+        )
     }
 
     func stop() {
@@ -93,7 +111,11 @@ final class DeskAssistantStore: ObservableObject {
                 let stream: AsyncThrowingStream<String, Error>
                 switch provider {
                 case .openAI:
-                    stream = openAIClient.stream(apiKey: apiKey, messages: payload)
+                    stream = openAIClient.stream(
+                        apiKey: apiKey,
+                        endpoint: store.openAIEndpoint,
+                        messages: payload
+                    )
                 case .spaceXAI:
                     stream = spaceXAIClient.stream(apiKey: apiKey, messages: payload)
                 }

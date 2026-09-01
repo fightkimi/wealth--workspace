@@ -27,7 +27,9 @@ struct WealthWorkbenchChecks {
         try checkSpaceXAIKeyFileRoundTrip()
         try checkAssistantProviderCompatibility()
         try checkOpenAIRequestAndStreamParser()
-        try checkOpenAIKeyFileRoundTrip()
+        try checkOpenAICredentialFileRoundTrip()
+        try await checkCredentialsRestoreAfterRelaunch()
+        try checkAssistantPlacementPersistence()
         try checkAssistantResponseTableParsing()
         print("VERIFICATION PASSED: \(passed) checks")
     }
@@ -433,10 +435,11 @@ struct WealthWorkbenchChecks {
     private static func checkOpenAIRequestAndStreamParser() throws {
         let request = try OpenAIRequestBuilder.makeURLRequest(
             apiKey: "test-openai-key-not-a-real-secret",
+            endpoint: "https://gateway.example.com/v1/responses",
             messages: [AssistantMessage(role: "user", content: "hello")],
             stream: true
         )
-        try expect(request.url?.absoluteString == "https://api.openai.com/v1/responses", "OpenAI 助手应使用 Responses API")
+        try expect(request.url?.absoluteString == "https://gateway.example.com/v1/responses", "OpenAI 助手应使用本机配置的 Responses 访问地址")
         try expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-openai-key-not-a-real-secret", "OpenAI 请求应使用 Bearer 本地凭证")
         let body = try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
         try expect(body?["model"] as? String == "gpt-5.6-sol", "OpenAI 默认模型应为 gpt-5.6-sol")
@@ -451,22 +454,78 @@ struct WealthWorkbenchChecks {
         } catch OpenAIClientError.missingAPIKey {
             // expected
         }
+        do {
+            _ = try OpenAIRequestBuilder.makeURLRequest(
+                apiKey: "test-openai-key-not-a-real-secret",
+                endpoint: "file:///tmp/responses",
+                messages: []
+            )
+            throw CheckError.failed("OpenAI 访问地址必须拒绝本地文件协议")
+        } catch OpenAIClientError.invalidEndpoint {
+            // expected
+        }
         pass("OpenAI Responses 请求与流式解析")
     }
 
-    private static func checkOpenAIKeyFileRoundTrip() throws {
+    private static func checkOpenAICredentialFileRoundTrip() throws {
         let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("wealth-openai-key-check-\(UUID().uuidString)", isDirectory: true)
-        let fileURL = directory.appendingPathComponent("openai-api-key.txt")
-        let store = APIKeyFileStore(filename: "openai-api-key.txt", fileURL: fileURL)
+            .appendingPathComponent("wealth-openai-credential-check-\(UUID().uuidString)", isDirectory: true)
+        let fileURL = directory.appendingPathComponent("openai-credentials.json")
+        let store = OpenAICredentialFileStore(fileURL: fileURL)
         defer { try? FileManager.default.removeItem(at: directory) }
 
-        try store.save("test-openai-key-not-a-real-secret")
-        try expect(try APIKeyFileStore(filename: "openai-api-key.txt", fileURL: fileURL).load() == "test-openai-key-not-a-real-secret", "OpenAI Key 应可从本地文件还原")
+        let credential = OpenAICredential(
+            apiKey: "test-openai-key-not-a-real-secret",
+            endpoint: "https://gateway.example.com/v1/responses"
+        )
+        try store.save(credential)
+        try expect(try OpenAICredentialFileStore(fileURL: fileURL).load() == credential, "OpenAI 访问地址与 Key 应成对从本地文件还原")
         let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
         let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue
-        try expect(permissions == 0o600, "OpenAI 凭证文件权限必须为 0600")
-        pass("OpenAI API Key 本地权限")
+        try expect(permissions == 0o600, "OpenAI 本地配置文件权限必须为 0600")
+        pass("OpenAI 地址与 Key 成对持久化")
+    }
+
+    @MainActor
+    private static func checkCredentialsRestoreAfterRelaunch() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wealth-credential-relaunch-check-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let twelve = APIKeyFileStore(fileURL: directory.appendingPathComponent("twelve.txt"))
+        let xai = APIKeyFileStore(filename: "xai.txt", fileURL: directory.appendingPathComponent("xai.txt"))
+        let openAI = OpenAICredentialFileStore(fileURL: directory.appendingPathComponent("openai.json"))
+        try twelve.save("test-twelve-key")
+        try xai.save("test-xai-key")
+        try openAI.save(OpenAICredential(apiKey: "test-openai-key", endpoint: "https://gateway.example.com/v1/responses"))
+
+        let relaunched = AppStore(
+            persistence: StaticPortfolioStore(value: PortfolioData()),
+            apiKeyStore: twelve,
+            spaceXAIKeyStore: xai,
+            openAICredentialStore: openAI
+        )
+        try expect(relaunched.twelveDataKeyPresent, "Twelve Data Key 应在重新启动后自动恢复")
+        try expect(relaunched.spaceXAIKeyPresent, "SpaceXAI Key 应在重新启动后自动恢复")
+        try expect(relaunched.openAIKeyPresent, "OpenAI Key 应在重新启动后自动恢复")
+        try expect(relaunched.openAIEndpoint == "https://gateway.example.com/v1/responses", "OpenAI 访问地址应在重新启动后自动恢复")
+        pass("应用重启后自动恢复全部本地凭证")
+    }
+
+    private static func checkAssistantPlacementPersistence() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wealth-assistant-placement-check-\(UUID().uuidString)", isDirectory: true)
+        let fileURL = directory.appendingPathComponent("assistant-placement.json")
+        let store = AssistantPlacementFileStore(fileURL: fileURL)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let placement = AssistantPlacement(x: -320, y: -140)
+        try store.save(placement)
+        try expect(try AssistantPlacementFileStore(fileURL: fileURL).load() == placement, "悬浮助手拖动位置应在重新启动后还原")
+        let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+        let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue
+        try expect(permissions == 0o600, "悬浮助手位置文件权限必须为 0600")
+        pass("悬浮助手位置持久化")
     }
 
     private static func checkAssistantResponseTableParsing() throws {

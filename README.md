@@ -6,7 +6,7 @@ Private Capital Desk：一款只读行情、资产数据留在本机的原生 ma
 
 - 资产、现金和事件写入 `~/Library/Application Support/WealthWorkbench/portfolio.json`。
 - Twelve Data API Key 保存在应用专属本地文件，文件权限为 `0600`，不读取或写入钥匙串。
-- AUREL Desk 可选择 OpenAI `gpt-5.6-sol` 或 SpaceXAI `grok-4.6`。两套 API Key 分别写入应用专属本地文件（`openai-api-key.txt` / `xai-api-key.txt`，权限 `0600`），也可使用 `OPENAI_API_KEY` / `XAI_API_KEY` 环境变量；不读取或写入钥匙串。发送对话时会把当前持仓快照传给所选服务，原始资产文件仍只保存在本机。
+- AUREL Desk 可选择 OpenAI `gpt-5.6-sol` 或 SpaceXAI `grok-4.6`。OpenAI 的完整 Responses 访问地址与 API Key 成对写入 `openai-credentials.json`，SpaceXAI 与 Twelve Data Key 分别写入独立本地文件；全部位于 `~/Library/Application Support/WealthWorkbench/Credentials/`，权限 `0600`，重启自动恢复，不读取或写入钥匙串，也不会进入仓库。发送对话时会把当前持仓快照传给所选服务，原始资产文件仍只保存在本机。
 - 行情优先级为 Futu OpenD、Twelve Data、腾讯公开备用行情；备用行情始终标注“可能延迟”。
 - 每条价格附带市场、币种、价格类型、交易时段、比较基准、行情时间、抓取时间、来源和延迟状态。
 - 请求失败或字段不可验证时显示“暂无数据”，刷新前会清空旧行情。

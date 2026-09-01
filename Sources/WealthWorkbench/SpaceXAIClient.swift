@@ -16,7 +16,7 @@ enum SpaceXAIClientError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .missingAPIKey:
-            return "未配置 SpaceXAI API Key。请到通用设置保存到本地文件，或设置环境变量 XAI_API_KEY。"
+            return "未配置 SpaceXAI API Key。请到通用设置保存本机配置。"
         case .invalidResponse:
             return "SpaceXAI 返回了无法识别的内容"
         case .http(let code, let body):
