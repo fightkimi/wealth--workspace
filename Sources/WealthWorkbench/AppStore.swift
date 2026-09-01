@@ -106,7 +106,12 @@ final class AppStore: ObservableObject {
         do {
             let credential = try openAICredentialStore.load()
             openAIAPIKey = credential?.apiKey
-            openAIEndpoint = credential?.endpoint ?? OpenAICredential.defaultEndpoint
+            if let savedEndpoint = credential?.endpoint {
+                openAIEndpoint = (try? OpenAIRequestBuilder.validatedEndpoint(savedEndpoint).absoluteString)
+                    ?? savedEndpoint
+            } else {
+                openAIEndpoint = OpenAICredential.defaultEndpoint
+            }
             openAIKeyPresent = openAIAPIKey?.isEmpty == false
         } catch {
             if notice == nil {

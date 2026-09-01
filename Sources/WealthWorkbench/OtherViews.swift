@@ -1150,7 +1150,7 @@ struct SettingsView: View {
                 if store.assistantProvider == .openAI {
                     VStack(alignment: .leading, spacing: 7) {
                         HStack {
-                            settingsLabel("Responses 访问地址")
+                            settingsLabel("API 访问地址")
                             Spacer()
                             if openAIEndpoint != store.openAIEndpoint {
                                 Text("地址尚未保存")
@@ -1161,8 +1161,8 @@ struct SettingsView: View {
                         TextField(OpenAICredential.defaultEndpoint, text: $openAIEndpoint)
                             .focused($focusedInput, equals: .assistantEndpoint)
                             .workbenchInputField(isFocused: focusedInput == .assistantEndpoint)
-                            .accessibilityLabel("OpenAI Responses 访问地址")
-                        Text("填写完整 Responses 地址。官方默认是 https://api.openai.com/v1/responses；非本机地址必须使用 HTTPS。")
+                            .accessibilityLabel("OpenAI API 访问地址")
+                        Text("可填写服务根地址、/v1、/v1/responses 或 /v1/chat/completions；AUREL 会自动识别并补全。非本机地址必须使用 HTTPS。")
                             .font(.custom("PingFangSC-Regular", size: 9))
                             .foregroundStyle(WorkbenchTheme.muted)
                             .fixedSize(horizontal: false, vertical: true)

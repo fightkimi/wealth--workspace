@@ -29,6 +29,7 @@ struct WealthWorkbenchChecks {
         try checkAssistantProviderCompatibility()
         try checkOpenAIRequestAndStreamParser()
         try await checkOpenAIStreamCompletionFallback()
+        try await checkOpenAIRejectsHTMLLandingPage()
         try checkOpenAICredentialFileRoundTrip()
         try await checkCredentialsRestoreAfterRelaunch()
         try checkAssistantPlacementPersistence()
@@ -490,6 +491,14 @@ struct WealthWorkbenchChecks {
     }
 
     private static func checkOpenAIRequestAndStreamParser() throws {
+        try expect(
+            try OpenAIRequestBuilder.validatedEndpoint("https://gateway.example.com/v1").absoluteString == "https://gateway.example.com/v1/responses",
+            "OpenAI 基础 v1 地址必须自动补全 Responses 路径"
+        )
+        try expect(
+            try OpenAIRequestBuilder.validatedEndpoint("https://gateway.example.com").absoluteString == "https://gateway.example.com/v1/responses",
+            "OpenAI 服务根地址必须自动补全 v1/responses 路径"
+        )
         let request = try OpenAIRequestBuilder.makeURLRequest(
             apiKey: "test-openai-key-not-a-real-secret",
             endpoint: "https://gateway.example.com/v1/responses",
@@ -522,6 +531,19 @@ struct WealthWorkbenchChecks {
         try expect(systemBody?["instructions"] as? String == "只读投资助手", "Responses API 应使用独立 instructions 承载系统指令")
         let input = systemBody?["input"] as? [[String: Any]]
         try expect(input?.count == 1 && input?.first?["role"] as? String == "user", "系统指令不得重复混入用户输入")
+
+        let chatRequest = try OpenAIRequestBuilder.makeURLRequest(
+            apiKey: "test-openai-key-not-a-real-secret",
+            endpoint: "https://gateway.example.com/v1/chat/completions",
+            messages: [
+                AssistantMessage(role: "system", content: "只读投资助手"),
+                AssistantMessage(role: "user", content: "审视组合")
+            ],
+            stream: true
+        )
+        let chatBody = try JSONSerialization.jsonObject(with: chatRequest.httpBody ?? Data()) as? [String: Any]
+        try expect(chatRequest.url?.path == "/v1/chat/completions", "显式 Chat Completions 地址应保持不变")
+        try expect(chatBody?["messages"] as? [[String: Any]] != nil && chatBody?["input"] == nil, "Chat Completions 地址必须使用 messages 请求格式")
         do {
             _ = try OpenAIRequestBuilder.makeURLRequest(apiKey: "   ", messages: [])
             throw CheckError.failed("OpenAI 空 API Key 必须拒绝发请求")
@@ -575,6 +597,36 @@ struct WealthWorkbenchChecks {
         pass("OpenAI 完成事件流兜底")
     }
 
+    private static func checkOpenAIRejectsHTMLLandingPage() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        MockURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: "HTTP/2",
+                headerFields: ["Content-Type": "text/html; charset=utf-8"]
+            )!
+            return (response, Data("<html><body>gateway landing page</body></html>".utf8))
+        }
+        let client = OpenAIClient(session: session, model: "gpt-5.6-sol")
+        do {
+            for try await _ in client.stream(
+                apiKey: "test-openai-key-not-a-real-secret",
+                endpoint: "https://gateway.example.com/v1/responses",
+                messages: [AssistantMessage(role: "user", content: "hello")]
+            ) {}
+            throw CheckError.failed("HTML 网页响应必须被识别为错误")
+        } catch let error as OpenAIClientError {
+            try expect(
+                error.errorDescription?.contains("网页") == true && error.errorDescription?.contains("/responses") == true,
+                "HTML 网页响应应给出可操作的地址提示"
+            )
+        }
+        pass("OpenAI 网页地址误配诊断")
+    }
+
     private static func checkOpenAICredentialFileRoundTrip() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("wealth-openai-credential-check-\(UUID().uuidString)", isDirectory: true)
@@ -605,7 +657,7 @@ struct WealthWorkbenchChecks {
         let openAI = OpenAICredentialFileStore(fileURL: directory.appendingPathComponent("openai.json"))
         try twelve.save("test-twelve-key")
         try xai.save("test-xai-key")
-        try openAI.save(OpenAICredential(apiKey: "test-openai-key", endpoint: "https://gateway.example.com/v1/responses"))
+        try openAI.save(OpenAICredential(apiKey: "test-openai-key", endpoint: "https://gateway.example.com/v1"))
 
         let relaunched = AppStore(
             persistence: StaticPortfolioStore(value: PortfolioData()),
@@ -616,7 +668,7 @@ struct WealthWorkbenchChecks {
         try expect(relaunched.twelveDataKeyPresent, "Twelve Data Key 应在重新启动后自动恢复")
         try expect(relaunched.spaceXAIKeyPresent, "SpaceXAI Key 应在重新启动后自动恢复")
         try expect(relaunched.openAIKeyPresent, "OpenAI Key 应在重新启动后自动恢复")
-        try expect(relaunched.openAIEndpoint == "https://gateway.example.com/v1/responses", "OpenAI 访问地址应在重新启动后自动恢复")
+        try expect(relaunched.openAIEndpoint == "https://gateway.example.com/v1/responses", "重启后应恢复并自动补全 OpenAI Responses 地址")
         pass("应用重启后自动恢复全部本地凭证")
     }
 

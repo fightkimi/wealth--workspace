@@ -6,6 +6,7 @@ enum OpenAIClientError: LocalizedError, Equatable {
     case invalidResponse
     case http(Int, String)
     case emptyOutput
+    case htmlLandingPage
 
     var errorDescription: String? {
         switch self {
@@ -20,6 +21,8 @@ enum OpenAIClientError: LocalizedError, Equatable {
             return detail.isEmpty ? "OpenAI HTTP \(code)" : "OpenAI HTTP \(code)：\(detail)"
         case .emptyOutput:
             return "OpenAI 没有返回有效回复"
+        case .htmlLandingPage:
+            return "OpenAI 访问地址返回了网页而不是 API 数据。可填写服务根地址或 /v1，AUREL 会自动补全 /responses。"
         }
     }
 }
@@ -29,20 +32,26 @@ enum OpenAIRequestBuilder {
 
     static func validatedEndpoint(_ value: String) throws -> URL {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let components = URLComponents(string: trimmed),
+        guard var components = URLComponents(string: trimmed),
               let scheme = components.scheme?.lowercased(),
               let host = components.host?.lowercased(),
               !host.isEmpty,
               components.user == nil,
               components.password == nil,
-              components.fragment == nil,
-              let url = components.url else {
+              components.fragment == nil else {
             throw OpenAIClientError.invalidEndpoint
         }
         let localHosts = ["localhost", "127.0.0.1", "::1"]
         guard scheme == "https" || (scheme == "http" && localHosts.contains(host)) else {
             throw OpenAIClientError.invalidEndpoint
         }
+        let path = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if path.isEmpty {
+            components.path = "/v1/responses"
+        } else if path.lowercased().hasSuffix("/v1") || path.lowercased() == "v1" {
+            components.path = "/" + path + "/responses"
+        }
+        guard let url = components.url else { throw OpenAIClientError.invalidEndpoint }
         return url
     }
 
@@ -56,33 +65,48 @@ enum OpenAIRequestBuilder {
         let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw OpenAIClientError.missingAPIKey }
 
-        var request = URLRequest(url: try validatedEndpoint(endpoint))
+        let endpointURL = try validatedEndpoint(endpoint)
+        var request = URLRequest(url: endpointURL)
         request.httpMethod = "POST"
         request.timeoutInterval = 300
         request.setValue("Bearer \(trimmed)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("AUREL/1.1", forHTTPHeaderField: "User-Agent")
 
-        let instructions = messages
-            .filter { $0.role == "system" || $0.role == "developer" }
-            .map(\.content)
-            .joined(separator: "\n\n")
-        let input = messages
-            .filter { $0.role != "system" && $0.role != "developer" }
-            .map { ["role": $0.role, "content": $0.content] }
+        let isChatCompletions = endpointURL.path
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            .lowercased()
+            .hasSuffix("chat/completions")
+        let body: [String: Any]
+        if isChatCompletions {
+            body = [
+                "model": model,
+                "stream": stream,
+                "messages": messages.map { ["role": $0.role, "content": $0.content] }
+            ]
+        } else {
+            let instructions = messages
+                .filter { $0.role == "system" || $0.role == "developer" }
+                .map(\.content)
+                .joined(separator: "\n\n")
+            let input = messages
+                .filter { $0.role != "system" && $0.role != "developer" }
+                .map { ["role": $0.role, "content": $0.content] }
 
-        // Responses API keeps high-priority instructions separate from input items.
-        // Source: https://developers.openai.com/api/reference/resources/responses/methods/create
-        var body: [String: Any] = [
-            "model": model,
-            "stream": stream,
-            "store": false,
-            "reasoning": ["effort": "medium"],
-            "text": ["verbosity": "medium"],
-            "input": input
-        ]
-        if !instructions.isEmpty {
-            body["instructions"] = instructions
+            // Responses API keeps high-priority instructions separate from input items.
+            // Source: https://developers.openai.com/api/reference/resources/responses/methods/create
+            var responsesBody: [String: Any] = [
+                "model": model,
+                "stream": stream,
+                "store": false,
+                "reasoning": ["effort": "medium"],
+                "text": ["verbosity": "medium"],
+                "input": input
+            ]
+            if !instructions.isEmpty {
+                responsesBody["instructions"] = instructions
+            }
+            body = responsesBody
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return request
@@ -231,9 +255,18 @@ struct OpenAIClient {
                         }
                         throw OpenAISSEParser.errorMessage(from: collected, status: http.statusCode)
                     }
+                    if http.value(forHTTPHeaderField: "Content-Type")?
+                        .lowercased()
+                        .contains("text/html") == true {
+                        throw OpenAIClientError.htmlLandingPage
+                    }
                     var assembled = ""
                     for try await line in bytes.lines {
                         if Task.isCancelled { break }
+                        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                        if trimmed.hasPrefix("<!doctype html") || trimmed.hasPrefix("<html") {
+                            throw OpenAIClientError.htmlLandingPage
+                        }
                         guard let event = try OpenAISSEParser.textEvent(from: line) else { continue }
                         switch event {
                         case .delta(let delta):
